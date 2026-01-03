@@ -14,5 +14,5 @@ Use the top right search bar and then scroll to the bottom.  Look for 'follow', 
 
 
 https://github.com/user-attachments/assets/c1f51284-04df-4b3f-b00b-24fffe2893fb  
-![signal-2026-01-02-211820](https://github.com/user-attachments/assets/6d41c97f-862c-4c13-a880-23f4088796c3)
 
+![signal-2026-01-02-211820](https://github.com/user-attachments/assets/6d41c97f-862c-4c13-a880-23f4088796c3)
