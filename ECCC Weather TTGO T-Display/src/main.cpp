@@ -35,10 +35,10 @@ const char* ALERTS_URL = "https://weather.gc.ca/rss/battleboard/ab12_e.xml"; // 
       //>>>>  Use the top right search bar and then scroll to the bottom.  Look for 'follow', the orange RSS feed icon, and select ALERTS
 
       // Timing
-const unsigned long UPDATE_INTERVAL = 1200000UL; //  20 minutes  1200000UL  
+const unsigned long UPDATE_INTERVAL = 900000UL; // 15 min = 900000UL
 // Environment Canada / NavCan usually updates weather information once per hour at the top of the hour.
 // During unstable weather conditions and storms some MANUAL stations may update two or three times per hour.
-const unsigned long ALERT_INTERVAL  = 900000UL; // 15 min = 900000UL//
+const unsigned long ALERT_INTERVAL  = 1200000UL; //  20 minutes  1200000UL  
 unsigned long lastUpdate = 0;
 unsigned long lastAlertUpdate = 0;
 
@@ -549,6 +549,7 @@ void drawDisplay() {
   drawWordWrappedText(0, 210, tft.width(),alertTitle.c_str());
 
 }
+
 
 
 
