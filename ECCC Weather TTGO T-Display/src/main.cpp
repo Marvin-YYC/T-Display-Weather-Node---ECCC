@@ -472,12 +472,13 @@ String decodeWeather(const String& c) {
   if (c=="79")  return "Light Snow";
   if (c=="85")  return "Snow Showers";
   if (c=="86")  return "Hvy Snow Shwrs";
+  if (c=="88")  return "Snow Grains";
 
   // ---- Blowing / Drifting Snow 
   if (c=="120") return "Blowing Snow";
   if (c=="121") return "Drifting Snow";
   if (c=="122") return "Hvy Blowing Snow";
-    if (c=="132") return "Drifting Snow"; 
+  if (c=="132") return "Drifting Snow"; 
 
   // ---- Mixed Precip ----
   if (c=="68")  return "Rain & Snow";
@@ -499,7 +500,7 @@ String decodeWeather(const String& c) {
   // ---- Fallback ----
   if (c=="300")  return "N/A this station";
 
-  return "unknown code "; //return "unknown code " + c;
+  return "unknown"; //return "unknown code " + c;
   
 }
 
@@ -549,6 +550,7 @@ void drawDisplay() {
   drawWordWrappedText(0, 210, tft.width(),alertTitle.c_str());
 
 }
+
 
 
 
