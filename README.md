@@ -19,6 +19,7 @@ The 'Alert' text is colour coded to match the alert status.  Grey text indicates
 
 GO HERE>> https://dd.weather.gc.ca/today/observations/swob-ml/latest/  ->> to obtain the the SWOB Weather feed for your local weather station or airport. 
 Note: Not all data fields are availbe for all stations all the time.  Fields showing "--" may not be available for all fetches.
+Sortable Station List here>> https://dd.weather.gc.ca/today/observations/doc/swob-xml_station_list.csv
 
 GO HERE>> https://weather.gc.ca/  ->> to obtain the the ALERT RSS feed for your local alerts
 Use the top right search bar and then scroll to the bottom.  Look for 'follow', the orange RSS feed icon, and select ALERTS
