@@ -6,8 +6,12 @@ I haven't added any additional fonts, weather icons, or other complications at t
 I might change the screen to a horizontal display with larger fonts to make it easier to read with another page or two, but it's a very small display for so much data.
 
 So far it is a basic sketch to fetch current weather and weather alert data from Environment Canada and Nav Canada weather stations.
-ECCC usually updates WX once per hour at the top of the hour, but when local weather is unstable some manual stations update more frequently.  
+ECCC stations usually updates WX once per hour at the top of the hour, but when local weather is unstable some MAN stations update more frequently.
+Some AUTO stations may update every 60 seconds, but data is limited.  Not all stations provide all the info that I have setup in this sketch'
+You may want to adjust your own sketch to work best for your station.
+
 This device updates WX info every 15 minutes and the 'Alerts' fetch every 20 minutes.  
+
 The 'Alert' text is colour coded to match the alert status.  Grey text indicates 'no active Alerts'.  Pink text for 'Special' weather statements, Yellow text for Yellow 'Alerts', etc.
 
     Jan 5/26
