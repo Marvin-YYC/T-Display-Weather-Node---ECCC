@@ -10,6 +10,13 @@ ECCC usually updates WX once per hour at the top of the hour, but when local wea
 This device updates WX info every 15 minutes and the 'Alerts' fetch every 20 minutes.  
 The 'Alert' text is colour coded to match the alert status.  Grey text indicates 'no active Alerts'.  Pink text for 'Special' weather statements, Yellow text for Yellow 'Alerts', etc.
 
+    Jan 5/26
+    Added vertical layout, so i could make the text larger.  Looks better and is much easier to read.  
+    Also with the additional pages I was able to add more data.
+    FYI: Sometime ECCC doesn't provide all the data for each field during every update.  
+    If lines are blank, it is not an error, but just that the data wasn't availble during that update. 
+    For example if there are no wind gusts, the field will show "--" if "MSNG" appears it is becuse ECCC didn't send the data but did update the line with MSNG.
+
 GO HERE>> https://dd.weather.gc.ca/today/observations/swob-ml/latest/  ->> to obtain the the SWOB Weather feed for your local weather station or airport. 
 Note: Not all data fields are availbe for all stations all the time.  Fields showing "--" may not be available for all fetches.
 
@@ -32,6 +39,18 @@ Use the top right search bar and then scroll to the bottom.  Look for 'follow', 
     IMPORTANT - one edit required for User_Setup_Select.h file uncomment this line.
 line 61 - #include <User_Setups/Setup25_TTGO_T_Display.h>    // Setup file for ESP32 and TTGO T-Display ST7789V SPI bus TFT
 
+Horizontal Layout
+![signal-2026-01-05-204349](https://github.com/user-attachments/assets/7ce37b1f-3414-4995-a689-dc3c45fdd966)
+
+![signal-2026-01-05-204349_006](https://github.com/user-attachments/assets/c1c86122-faa9-4fd7-beac-4dfb4fbb8947)
+
+![signal-2026-01-05-204349_003](https://github.com/user-attachments/assets/0808bc18-031a-4a4f-ab33-047ea8318a9c)
+
+![signal-2026-01-05-204349_004](https://github.com/user-attachments/assets/f2ab6b5a-88b7-49c1-943f-e4070a7143b5)
+
+![signal-2026-01-05-204349_002](https://github.com/user-attachments/assets/dc2145d2-97a8-466c-a035-94b8bc59b186)
+
+Vertical Layout
 
 https://github.com/user-attachments/assets/c1f51284-04df-4b3f-b00b-24fffe2893fb  
 
