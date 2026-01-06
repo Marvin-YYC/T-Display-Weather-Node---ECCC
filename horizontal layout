@@ -21,7 +21,7 @@ const int pwmChannel = 0;
 #define BUTTON_PIN 0   // TTGO left front button controls screen brightness
 
 // WiFi
-const char* ssid = "YOUR_SSID";    // >>>>EDIT YOU SSID HERE
+const char* ssid = "YOUR_SSID";    // >>>>EDIT YOUR SSID HERE
 const char* password = "YOUR_SSID_PASSWORD"; // >>>>EDIT YOUR SSID PASWORD HERE
 
 // ECCC Current Weather SWOB  nav_canada/observation/atmospheric/surface_weather 
