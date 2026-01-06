@@ -413,8 +413,8 @@ String utcToLocal(const String& utc) {
   tzset();
   time_t t = mktime(&tm);
 
-  // Calgary TZ
-  setenv("TZ","MST7MDT,M3.2.0,M11.1.0",1);
+  // >>>>>>> EDIT Enter your local POSIX timezone string here
+  setenv("TZ","MST7MDT,M3.2.0,M11.1.0",1);  // Calgary time zone //  >>>>>>> EDIT Enter your local POSIX timezone string here
   tzset();
   struct tm *lt = localtime(&t);
 
@@ -552,6 +552,7 @@ void drawDisplay() {
   drawWordWrappedText(0, 210, tft.width(),alertTitle.c_str());
 
 }
+
 
 
 
