@@ -1,7 +1,6 @@
 //  Created by Marvin - Third Planet
-//  Horizontal Layout
-//  5/JAN/25 17:35
-
+//  Horizontal Layout with RGB LED Alerts
+//  6/JAN/25 20:20
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <TFT_eSPI.h>
@@ -19,13 +18,25 @@ const int pwmChannel = 0;
 #define BACKLIGHT_FREQ 5000
 #define BACKLIGHT_RES 8  
 #define BUTTON_PIN 0   // TTGO left front button controls screen brightness
+#define LED_R 25
+#define LED_G 26
+#define LED_B 27
+
+bool alertBlinked = false;
+
+
 
 // WiFi
-const char* ssid = "YOUR_SSID";    // >>>>EDIT YOUR SSID HERE
-const char* password = "YOUR_SSID_PASSWORD"; // >>>>EDIT YOUR SSID PASWORD HERE
+const char* ssid = "YOUR_SSID_HERE";    // >>>>EDIT YOUR_SSID_HERE
+const char* password = "YOUR_SSID_PASSWORD_HERE"; // >>>>EDIT YOUR_SSID_PASSWORD_HERE
 
 // ECCC Current Weather SWOB  nav_canada/observation/atmospheric/surface_weather 
-const char* CurrWXURL ="https://dd.weather.gc.ca/today/observations/swob-ml/latest/CYYC-MAN-swob.xml"; // CYYC  Calgary, AB
+const char* CurrWXURL ="https://dd.weather.gc.ca/today/observations/swob-ml/latest/CYYC-MAN-swob.xml"; // CYYC ~ Calgary International, AB - MAN
+
+// other Calgary Area stations
+// const char* CurrWXURL ="https://dd.weather.gc.ca/today/observations/swob-ml/latest/CPCI-AUTO-minute-swob.xml";    // CPCI ~ CALGARY INT'L CS, AB - AUTO minute
+// const char* CurrWXURL ="https://dd.weather.gc.ca/today/observations/swob-ml/latest/CPCI-AUTO-minute-swob.xml"; //CPCI ~ CALGARY INT'L CS, AB - AUTO
+// const char* CurrWXURL ="https://dd.weather.gc.ca/today/observations/swob-ml/latest/CYBW-AUTO-swob.xml";    // CYBW ~ Calgary/Springbank, AB - AUTO
 
 // ECCC Weather Alerts ATOM RSS feed
 const char* ALERTS_URL = "https://weather.gc.ca/rss/battleboard/ab12_e.xml"; // CYYC  Calgary, AB
@@ -45,21 +56,21 @@ int screenWidth;
 
 // Weather values
 String tempC="--", maxTemp24="--", minTemp24="--", dewpoint="--", humidity="--";
-String pressure="--", pressureSLP="--", pressTrend="--", windSpeed="--", windGust="--";
+String pressure="--", pressureSLP="--", windSpeed="--", windGust="--";
 String windDir="--", windCardinal="--";
 String visibility="--", cloudBase1="--", vertVis="--", cloudBase2="--", cloudCover="--";
 String wxCode="--", wxText="--", wxText2="--";
 String obsUTC="--", obsLocal="--";
-String conditionText = "--";
-String stationName="----__", stationId="--";
+String conditionText = "?";
+String stationName="-------", stationId="----";
 
 // Pressure trend
-float prevPressure = NAN;
-String pressureTrend = "→";
+//float prevPressure = NAN;
+//String pressureTrend = "→";
 
 // Alerts
 String alertTitle = "No alerts";
-String alertSummary = "--";
+//String alertSummary = "--";
 
 // ===== Display paging =====
 enum Page { PAGE_ONE, PAGE_TWO, PAGE_THREE,PAGE_FOUR};
@@ -78,7 +89,6 @@ String windDegToCardinal(float);
 String decodeWeather(const String&);
 String utcToLocal(const String&);
 float windChill(float,float);
-//void drawDisplay();
 void drawScrollingText(int x, int y, String text, int maxWidth);
 String extractLabeledValue(const String &src, const String &label);
 void drawPageOne();
@@ -89,7 +99,7 @@ void drawPageFour();
 void showBootScreen() {
   tft.fillScreen(TFT_BLACK);
 
-  tft.setTextDatum(MC_DATUM);   // center text
+  tft.setTextDatum(MC_DATUM); 
   tft.setTextColor(TFT_CYAN, TFT_BLACK);
 
   tft.setTextSize(2);
@@ -121,6 +131,15 @@ void setup() {
   ledcSetup(BACKLIGHT_CHANNEL, BACKLIGHT_FREQ, BACKLIGHT_RES);
   ledcAttachPin(BACKLIGHT_PIN, BACKLIGHT_CHANNEL);
   ledcWrite(BACKLIGHT_CHANNEL, 100);  // Start at medium low brightness
+  //LED
+  pinMode(LED_R, OUTPUT);
+  pinMode(LED_G, OUTPUT);
+  pinMode(LED_B, OUTPUT);
+  // LED off
+  digitalWrite(LED_R, LOW);
+  digitalWrite(LED_G, LOW);
+  digitalWrite(LED_B, LOW);
+
   connectWiFi();
   fetchECData();
   fetchAlerts();
@@ -128,6 +147,38 @@ void setup() {
   drawPageOne();
   
 }
+void setAlertLED(uint16_t tftColor) {
+  bool r = false, g = false, b = false;
+
+  if (tftColor == TFT_RED) {
+    r = true;
+  } else if (tftColor == TFT_ORANGE) {
+    r = true; g = true;
+  } else if (tftColor == TFT_YELLOW) {
+    r = true; g = true;
+  } else if (tftColor == TFT_BLUE) {
+    r = true; b = true;
+  }
+
+  digitalWrite(LED_R, r ? HIGH : LOW);
+  digitalWrite(LED_G, g ? HIGH : LOW);
+  digitalWrite(LED_B, b ? HIGH : LOW);
+}
+
+void blinkAlertLED(uint16_t color) {
+  if (color == TFT_DARKGREY) return; // no alert
+  if (alertBlinked) return;
+
+  for (int i = 0; i < 3; i++) {
+    setAlertLED(color);
+    delay(200);
+    setAlertLED(TFT_DARKGREY);
+    delay(200);
+  }
+
+  alertBlinked = true;
+}
+
 
 void handleBrightnessButton() {
   static bool lastState = HIGH;
@@ -168,7 +219,7 @@ uint16_t getAlertColor(const String &title) {
     return TFT_YELLOW;
   }
   if (t.indexOf("SPECIAL") >= 0) {
-      return TFT_PINK;
+      return TFT_BLUE;
   }
 
   return TFT_DARKGREY; // no alert
@@ -187,6 +238,9 @@ void loop() {
     fetchAlerts();
     lastAlertUpdate = now;
   }
+
+  uint16_t alertColor = getAlertColor(alertTitle); // RGB LED
+  blinkAlertLED(alertColor); //RGB LED
 
   // Page switching
   if (now - pageTimer > PAGE_DURATION) {
@@ -281,7 +335,6 @@ void fetchECData() {
     minTemp24   = extractSWOBValue(xml,"min_air_temp_pst24hrs");
     humidity    = extractSWOBValue(xml,"rel_hum");
     pressure    = extractSWOBValue(xml,"stn_pres");
-    pressTrend  = extractSWOBValue(xml,"pres_tend_char_pst3hrs");
     pressureSLP = extractSWOBValue(xml,"mslp");
     windSpeed   = extractSWOBValue(xml,"avg_wnd_spd_10m_pst2mts");
     windGust    = extractSWOBValue(xml,"max_wnd_gst_spd_10m_pst10mts");
@@ -312,7 +365,6 @@ void fetchECData() {
     Serial.println(" Min24: " + minTemp24);
     Serial.println(" dew: " + dewpoint);
     Serial.println(" Press: " + pressure);
-    Serial.println(" Trend: " + pressTrend);
     Serial.println(" SLP: " + pressureSLP);
     Serial.println(" Vis: " + visibility);
     Serial.println(" CloudCover: " + cloudCover);
@@ -372,10 +424,15 @@ if (title.length() > 0 && title != "No alerts") {
     pos = end + 8;
   }
   alertTitle = foundTitle;
-
   Serial.println("Parsed Alert:");
   Serial.println(alertTitle);
-  Serial.println(alertSummary);
+  static String lastAlertTitle;
+
+if (alertTitle != lastAlertTitle) {
+  alertBlinked = false;
+  lastAlertTitle = alertTitle;
+    }
+
 }
 
 //String shortenAlertTitle(const String& title) {
@@ -464,13 +521,13 @@ String utcToLocal(const String& utc) {
   tzset();
   time_t t = mktime(&tm);
 
-  // >>>>>>> EDIT Enter your local POSIX timezone string here
-  setenv("TZ","MST7MDT,M3.2.0,M11.1.0",1);  // Calgary Time Zone  >>>>>>> EDIT Enter your local POSIX timezone string here
+  // >>>>>>> Place you local POSIX timezone string here 
+  setenv("TZ","MST7MDT,M3.2.0,M11.1.0",1);  // >>>>>>> EDIT Enter your local POSIX timezone string here
   tzset();
   struct tm *lt = localtime(&t);
 
   char buf[32];
-  strftime(buf,sizeof(buf),"%H:%M %Z",lt); // strftime(buf,sizeof(buf),"%H:%M %b %d %Z",lt); 
+  strftime(buf,sizeof(buf),"%H:%M %Z",lt); //time only // strftime(buf,sizeof(buf),"%H:%M %b %d %Z",lt); time + date 
   return String(buf);
 }
 
@@ -551,9 +608,9 @@ String decodeWeather(const String& c) {
   if (c=="33")  return "Sandstorm";
 
   // ---- Fallback ----
-  if (c=="300")  return "N/A this station";
+  if (c=="300")  return "N/A @ station";
 
-  return "code?"+c; //return "unknown code " + c;
+  return "?" + c; //return "unknown code " + c;
   
 }
 
@@ -569,9 +626,6 @@ void drawPageOne() {
   tft.printf("%s\n",tempC.c_str()); // Temperature
   tft.setTextSize(3);
   tft.setTextColor(TFT_CYAN); 
-  //tft.printf("%s \n",decodeWeather(conditionText).c_str()); // tft.printf("%s (%s)\n\n",decodeWeather(conditionText).c_str(),conditionText.c_str());
-    drawWordWrappedText(0, 64, tft.width(),decodeWeather(conditionText).c_str()); // Weather Condtion text
-  ////drawWordWrappedText(0, 60, tft.width(), ccCondition);
   tft.printf("\n");
   tft.setTextSize(1);
   tft.setTextColor(TFT_PINK); 
@@ -583,12 +637,9 @@ void drawPageOne() {
   tft.setTextSize(2);
   uint16_t alertColor = getAlertColor(alertTitle);
   tft.setTextColor(alertColor);
-  //tft.println("       ALERT:");
-  //tft.println("- - - - - - - - - - -");
-  //tft.printf("%s", alertTitle.c_str());  //  tft.printf("ALERT: %s\n", alertTitle.c_str());
-  //drawWordWrappedText(0, 100, tft.width(),foundTitle.c_str());
   drawWordWrappedText(0, 100, tft.width(),alertTitle.c_str());  // foundTitle
 }
+
 //PAGE TWO
 void drawPageTwo(){
   tft.setCursor(0,0);
@@ -601,11 +652,10 @@ void drawPageTwo(){
   tft.printf("Vis:%skm\n",visibility.c_str());  //  visibility
   tft.setTextColor(TFT_SKYBLUE);
   tft.printf("Wind:%skm/h\n" ,windSpeed.c_str()); 
-  //tft.printf("Wind: %s km/h<%s>\n",windSpeed.c_str(),windCardinal.c_str());  // avg windspeed + avg wind direction
   tft.printf("Dir: < %s >\n",windCardinal.c_str());
   tft.printf("Gust:%skm/h",windGust.c_str()); // max wind gust when available
-  //tft.printf("Gust: %s km/h\n",windGust=="MSNG"?"--":windGust.c_str()); // max wind gust when available
 }
+
 void drawPageThree(){
   tft.setCursor(0,0);
   tft.setTextSize(1);
@@ -620,10 +670,8 @@ void drawPageThree(){
   tft.printf("CldBase1: %s m\n",cloudBase1.c_str()); // cloud ceiling when available // tft.printf("Clouds: %s %%\n\n",cloudCover.c_str()); 
   tft.printf("CldBase2: %s m\n",cloudBase2.c_str()); 
   tft.printf("VertVis: %s m",vertVis.c_str()); // vertical visibility when available
-  //tft.printf("VertVis: %s m\n",vertVis=="MSNG"?"--":vertVis.c_str()); // vertical visibility when available
-  //tft.printf("BarPres: %s hPa %s hPa \n",pressure.c_str(),pressureSLP.c_str()); 
-  
 }
+
 void drawPageFour(){
   tft.setCursor(0,0);
   tft.setTextSize(1);
@@ -634,10 +682,8 @@ void drawPageFour(){
   tft.printf("Max24: %s C\n",maxTemp24.c_str()); 
   tft.printf("Min24: %s C\n",minTemp24.c_str()); 
   tft.printf("Dew: %s C\n",dewpoint.c_str()); // dewpoint
-  tft.printf("Trend: %s\n",pressTrend.c_str());
   tft.printf("StnPres: %s hPa \n",pressure.c_str());   // Station barometric pressure before sea level altitude ajustment
-  tft.printf("SLPres: %s hPa %s\n",pressureSLP.c_str(),pressureTrend.c_str()); // barometric pressure after sea level ajustment
+  tft.printf("SLPres: %s hPa %s\n",pressureSLP.c_str()); // barometric pressure after sea level ajustment
   tft.setTextColor(TFT_GREEN);
   tft.printf("> %s @ %s",stationId.c_str(),obsLocal.c_str());
 }
-
