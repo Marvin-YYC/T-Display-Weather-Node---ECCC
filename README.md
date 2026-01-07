@@ -12,15 +12,20 @@ You will probably want to adjust the sketch to work best for your station.
 
 This device updates WX info every 15 minutes and the 'Alerts' fetch every 20 minutes.  
 
-The 'Alert' text is colour coded to match the alert status.  Grey text indicates 'no active Alerts'.  Blue text for 'Special' weather statements, Yellow text for Yellow 'Alerts', etc. 
-Jan 6/25 Added RGB LED Alert to the code.  There is no onboard RGB LED so you will need to add your own common-cathode RGB LED.  Red GPIO 25 via 220–330Ω resistor, Green GPIO 26 via resistor, Blue GPIO 27 via resistor, Cathode GND common ground. The LED flashes 3 times when an alert is initially received using the same colours as noted for the alert text.
+The 'Alert' text is colour coded to match the alert status.  Grey text indicates 'no active Alerts'.  Blue text for 'Special' weather statements, Yellow text for
+Yellow 'Alerts', etc. 
 
-    Jan 5/26
-    Added vertical layout, so i could make the text larger.  Looks better and is much easier to read.  
-    Also with the additional pages I was able to add more data.
-    FYI: Sometime ECCC doesn't provide all the data for each field during every update.  
-    If lines are blank, it is not an error, but just that the data wasn't availble during that update. 
-    For example if there are no wind gusts, the field will show "--" if "MSNG" appears it is becuse ECCC didn't send the data but did update the line with MSNG.
+Jan 5/26
+Added horizontal layout cpp, so I could make the text larger.  Looks better and is much easier to read.  
+Also with the additional pages I was able to add more data.
+FYI: Sometimes ECCC doesn't provide all the data for each field during every update.  
+If lines are blank, it is not an error, but just that the data wasn't availble during that update. 
+For example if there are no wind gusts, the field will show "--" if "MSNG" appears it is becuse ECCC didn't send the data but did update the line with MSNG.
+
+Jan 6/25 
+Added RGB LED Alert to the code.  There is no onboard RGB LED so you will need to add your own common-cathode RGB LED.  Red GPIO 25 via 220–330Ω resistor, Green
+GPIO 26 via resistor, Blue GPIO 27 via resistor, Cathode GND common ground. The LED flashes 3 times when an alert is initially received using the same colours as
+noted for the alert text.
 
 GO HERE>> https://dd.weather.gc.ca/today/observations/swob-ml/latest/  ->> to obtain the the SWOB Weather feed for your local weather station or airport. 
 Note: Not all data fields are available for all stations all the time.  Fields showing "--" may not be available for all fetches.
