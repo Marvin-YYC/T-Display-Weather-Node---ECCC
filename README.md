@@ -3,16 +3,17 @@
 This is a work in progress.
 
 I haven't added any additional fonts, weather icons, or other complications at this time.  Nothing fancy . . . I did set up the left button of the T-display to control the backlight intensity.
-I might change the screen to a horizontal display with larger fonts to make it easier to read with another page or two, but it's a very small display for so much data.
+DONE>> I might change the screen to a horizontal display with larger fonts to make it easier to read with another page or two, but it's a very small display for so much data.
 
 So far it is a basic sketch to fetch current weather and weather alert data from Environment Canada and Nav Canada weather stations.
 ECCC stations usually updates WX once per hour at the top of the hour, but when local weather is unstable some MAN stations update more frequently.
 Some AUTO stations may update every 60 seconds, but data is limited.  Not all stations provide all the info that I have setup in this sketch'
-You may want to adjust your own sketch to work best for your station.
+You will probably want to adjust the sketch to work best for your station.
 
 This device updates WX info every 15 minutes and the 'Alerts' fetch every 20 minutes.  
 
-The 'Alert' text is colour coded to match the alert status.  Grey text indicates 'no active Alerts'.  Pink text for 'Special' weather statements, Yellow text for Yellow 'Alerts', etc.
+The 'Alert' text is colour coded to match the alert status.  Grey text indicates 'no active Alerts'.  Blue text for 'Special' weather statements, Yellow text for Yellow 'Alerts', etc. 
+Jan 6/25 Added RGB LED Alert to the code.  There is no onboard RGB LED so you will need to add your own common-cathode RGB LED.  Red GPIO 25 via 220–330Ω resistor, Green GPIO 26 via resistor, Blue GPIO 27 via resistor, Cathode GND common ground. The LED flashes 3 times when an alert is initially received using the same colours as noted for the alert text.
 
     Jan 5/26
     Added vertical layout, so i could make the text larger.  Looks better and is much easier to read.  
