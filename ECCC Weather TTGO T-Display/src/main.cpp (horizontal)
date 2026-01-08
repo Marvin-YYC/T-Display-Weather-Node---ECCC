@@ -298,8 +298,10 @@ void loop() {
 
 ////>>> WiFi
 void connectWiFi() {
- WiFi.begin(ssid, password);
-  tft.setCursor(0, 0); tft.println("Connecting WiFi...\n\n");
+  WiFi.begin(ssid, password);
+  tft.setTextSize(2);
+  tft.setCursor(0, 0); 
+  tft.println("Connecting WiFi...\n");
   unsigned long start = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - start < 20000) {
     delay(500);
@@ -307,14 +309,16 @@ void connectWiFi() {
   }
   Serial.println();
   if (WiFi.status() == WL_CONNECTED) {
-    tft.println("WiFi connected\n\n");
+    tft.setTextSize(2);
+    tft.println("WiFi connected\n");
     tft.println(WiFi.localIP().toString());
-    tft.println("\n");
-  tft.println(ssid);
-    delay(1000);
-  } else {
-    tft.println("WiFi FAILED");
+    tft.println(ssid);
     delay(2000);
+  } else {
+    tft.setTextSize(2);
+    tft.setTextColor(TFT_YELLOW);
+    tft.println("WiFi FAILED!!!");
+    delay(5000);
   }
   tft.fillScreen(TFT_BLACK);
 }
@@ -683,7 +687,7 @@ void drawPageFour(){
   tft.printf("Min24: %s C\n",minTemp24.c_str()); 
   tft.printf("Dew: %s C\n",dewpoint.c_str()); // dewpoint
   tft.printf("StnPres: %s hPa \n",pressure.c_str());   // Station barometric pressure before sea level altitude ajustment
-  tft.printf("SLPres: %s hPa %s\n",pressureSLP.c_str()); // barometric pressure after sea level ajustment
+  tft.printf("SLPres: %s hPa\n",pressureSLP.c_str()); // barometric pressure after sea level ajustment
   tft.setTextColor(TFT_GREEN);
   tft.printf("> %s @ %s",stationId.c_str(),obsLocal.c_str());
 }
