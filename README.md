@@ -27,6 +27,9 @@ Added RGB LED Alert to the code.  There is no onboard RGB LED so you will need t
 GPIO 26 via resistor, Blue GPIO 27 via resistor, Cathode GND common ground. The LED flashes 3 times when an alert is initially received using the same colours as
 noted for the alert text.
 
+Jan 19/25
+Changed layout further with larger fonts, and manual page changes.  There are now seven pages.  Added weather condition icons and NavCan remarks alert.
+
 GO HERE>> https://dd.weather.gc.ca/today/observations/swob-ml/latest/  ->> to obtain the the SWOB Weather feed for your local weather station or airport. 
 Note: Not all data fields are available for all stations all the time.  Fields showing "--" may not be available for all fetches.
 Sortable Station List here>> https://dd.weather.gc.ca/today/observations/doc/swob-xml_station_list.csv
