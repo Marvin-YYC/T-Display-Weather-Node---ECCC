@@ -1,6 +1,6 @@
   **Weather Information Display for the TTGO T-display and information from Environment Canada (ECCC) / NavCanada weather stations**
 
-This is a work in progress.
+This is a work in progress.  Jan 2/26
 
 I haven't added any additional fonts, weather icons, or other complications at this time.  Nothing fancy . . . I did set up the left button of the T-display to control the backlight intensity.
 DONE>> I might change the screen to a horizontal display with larger fonts to make it easier to read with another page or two, but it's a very small display for so much data.
