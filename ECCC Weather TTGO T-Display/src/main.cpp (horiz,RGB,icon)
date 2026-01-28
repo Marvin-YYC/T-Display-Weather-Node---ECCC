@@ -1,6 +1,5 @@
-
-//19/JAN/25 10:30am
-//WORKING Horizontal, with seven pages manual page change, Colour Alerts, Station ID line wrap, brightness button,  splash screen, and RGB LED Alerts weather icon , rmk: alerts
+//28/JAN/25 11:11
+//  Horizontal with four pages Tested Colour Alerts Station ID line wrap , brightness button,  splash screen, and RGB LED Alerts weather icon , rmk.alerts
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <TFT_eSPI.h>
@@ -27,8 +26,10 @@ bool alertBlinked = false;
 bool auroraDetected = false;
 bool contrailsDetected = false;
 bool tornadoDetected = false;
+bool funnelDetected = false;
 bool presfrDetected = false;
 bool presrrDetected = false;
+bool froinDetected = false;
 bool pageNeedsRedraw = true;
 
 //////
@@ -47,6 +48,11 @@ uint8_t tornadoFlashCount = 0;
 unsigned long tornadoLastToggle = 0;
 bool tornadoLedOn = false;
 
+bool funnelFlashActive = false;
+uint8_t funnelFlashCount = 0;
+unsigned long funnelLastToggle = 0;
+bool funnelLedOn = false;
+
 bool presfrFlashActive = false;
 uint8_t presfrFlashCount = 0;
 unsigned long presfrLastToggle = 0;
@@ -56,6 +62,11 @@ bool presrrFlashActive = false;
 uint8_t presrrFlashCount = 0;
 unsigned long presrrLastToggle = 0;
 bool presrrLedOn = false;
+
+bool froinFlashActive = false;
+uint8_t froinFlashCount = 0;
+unsigned long froinLastToggle = 0;
+bool froinLedOn = false;
 /////
 
 // WiFi
@@ -64,19 +75,15 @@ const char* password = "YOUR_SSID_PASSWORD_HERE"; // >>>>EDIT YOUR_SSID_PASSWORD
 
 // ECCC Current Weather SWOB  nav_canada/observation/atmospheric/surface_weather 
 const char* CurrWXURL ="https://dd.weather.gc.ca/today/observations/swob-ml/latest/CYYC-MAN-swob.xml"; // CYYC ~ Calgary International, AB - MAN
+//const char* CurrWXURL ="https://dd.weather.gc.ca/today/observations/swob-ml/latest/CWFX-AUTO-swob.xml"; // colville lake  WFX
 
 // other Calgary Area stations
 // const char* CurrWXURL ="https://dd.weather.gc.ca/today/observations/swob-ml/latest/CPCI-AUTO-minute-swob.xml";    // CPCI ~ CALGARY INT'L CS, AB - AUTO minute
 // const char* CurrWXURL ="https://dd.weather.gc.ca/today/observations/swob-ml/latest/CPCI-AUTO-minute-swob.xml"; //CPCI ~ CALGARY INT'L CS, AB - AUTO
 // const char* CurrWXURL ="https://dd.weather.gc.ca/today/observations/swob-ml/latest/CYBW-AUTO-swob.xml";    // CYBW ~ Calgary/Springbank, AB - AUTO
 
-
 // ECCC Weather Alerts ATOM RSS feed
 const char* ALERTS_URL = "https://weather.gc.ca/rss/battleboard/ab12_e.xml"; // CYYC  Calgary, AB
-
-//const char* ALERTS_URL = "https://weather.gc.ca/rss/battleboard/bc45_e.xml"; 
-//const char* ALERTS_URL = "https://weather.gc.ca/rss/battleboard/abrm7027_h_e.xml"; 
-
 
 // Timing
 const unsigned long UPDATE_INTERVAL = 900000UL;  // 15 min = 900000UL//
@@ -93,9 +100,6 @@ const unsigned long BUTTON_DEBOUNCE = 250;
 unsigned long pageTimer = 0;
 const unsigned long PAGE_TIMEOUT = 15000; // 15 seconds
 
-
-
-
 // TFT
 TFT_eSPI tft = TFT_eSPI();
 int screenWidth;
@@ -108,7 +112,7 @@ String visibility="--", cloudBase1="--", vertVis="--", cloudBase2="--",cloudBase
 String wxCode="--", wxText="--", wxText2="--";
 String obsUTC="--", obsLocal="--";
 String conditionText="?", Remark="--";
-String stationName="-------", stationId="----", tcId="---",wmoId="------",mscId="-----";
+String stationName="-------", stationId="----", tcId="---",wmoId="------",mscId="-----",rptType="--";
 String percAmt24="--",percAmt6="--", snowDpth="--";
 
 // Alerts
@@ -117,6 +121,8 @@ String alertTitle = "No alerts";
 // ===== Display paging =====
 enum Page { PAGE_ONE = 0, PAGE_TWO, PAGE_THREE,PAGE_FOUR,PAGE_FIVE,PAGE_SIX,PAGE_SEVEN};  // enum Page
 Page currentPage = PAGE_ONE; 
+//unsigned long pageTimer = 0; // <<
+//const unsigned long PAGE_DURATION = 10000UL; // 10 seconds  //<<   take this out if you don't want auto page 
 
 // Prototypes
 void connectWiFi();
@@ -129,10 +135,8 @@ String windDegToCardinal(float);
 String decodeWeather(const String&);
 String utcToLocal(const String&);
 float windChill(float,float);
-//void drawDisplay();
 void drawScrollingText(int x, int y, String text, int maxWidth);
 String extractLabeledValue(const String &src, const String &label);
-//String getStationId(const String& xml);
 void drawWeatherIcon();
 void drawPageOne();
 void drawPageTwo();
@@ -171,7 +175,7 @@ void showBootScreen() {
 void setup() {
   Serial.begin(115200);
   tft.init();
-  tft.setRotation(1);
+  tft.setRotation(1); // Horz
   showBootScreen(); 
   tft.fillScreen(TFT_BLACK);
   tft.setTextColor(TFT_WHITE);
@@ -194,6 +198,7 @@ void setup() {
   connectWiFi();
   fetchECData();
   fetchAlerts();
+  //pageTimer = millis();  // <<  //<<   take this out if you don't want auto page 
   drawPageOne();
   
 }
@@ -239,11 +244,11 @@ void handleAuroraLED() {
     auroraLedOn = !auroraLedOn;
 
     if (auroraLedOn) {
-      digitalWrite(LED_G, HIGH);
+      digitalWrite(LED_B, HIGH);
     } else {
-      digitalWrite(LED_G, LOW);
+      digitalWrite(LED_B, LOW);
       auroraFlashCount++;
-      if (auroraFlashCount >= 3) {
+      if (auroraFlashCount >= 4) {
         auroraFlashActive = false;
         auroraFlashCount = 0;
       }
@@ -295,6 +300,28 @@ void handleTornadoLED() {
   }
 }
 
+void handleFunnelLED() {
+  if (!funnelFlashActive) return;
+
+  unsigned long now = millis();
+
+  if (now - funnelLastToggle >= 600) { // slow flash
+    funnelLastToggle = now;
+    funnelLedOn = !funneloLedOn;
+
+    if (funnelLedOn) {
+      digitalWrite(LED_R, HIGH);
+    } else {
+      digitalWrite(LED_R, LOW);
+      funnelFlashCount++;
+      if (funnelFlashCount >= 20) {
+        funnelFlashActive = false;
+        funnelFlashCount = 0;
+      }
+    }
+  }
+}
+
 void handlePresfrLED() {
   if (!presfrFlashActive) return;
 
@@ -334,6 +361,28 @@ void handlePresrrLED() {
       if (presrrFlashCount >= 2) {
         presrrFlashActive = false;
         presrrFlashCount = 0;
+      }
+    }
+  }
+}
+
+void handleFroinLED() {
+  if (!froinFlashActive) return;
+
+  unsigned long now = millis();
+
+  if (now - froinLastToggle >= 600) { // slow flash
+    froinLastToggle = now;
+    froinLedOn = !froinLedOn;
+
+    if (froinLedOn) {
+      digitalWrite(LED_G, HIGH);
+    } else {
+      digitalWrite(LED_G, LOW);
+      froinFlashCount++;
+      if (froinFlashCount >= 2) {
+        froinFlashActive = false;
+        froinFlashCount = 0;
       }
     }
   }
@@ -399,6 +448,7 @@ void handlePageButton() {
     tft.fillScreen(TFT_BLACK);
 
     Serial.printf("Button → Page %d\n", currentPage);
+    //delay(200); // debounce
   }
 
   lastState = currentState;
@@ -432,8 +482,10 @@ void loop() {
   handleAuroraLED();
   handleContrailsLED();
   handleTornadoLED();
+  handleFunnelLED();
   handlePresfrLED();
   handlePresrrLED();
+  handleFroinLED();
 
   // ----- Weather update -----
   if (now - lastUpdate > UPDATE_INTERVAL) {
@@ -487,7 +539,7 @@ void loop() {
         break;
     }
 
-    pageNeedsRedraw = false;  // ✅ stop flicker
+    pageNeedsRedraw = false;  
   }
 
   delay(50);
@@ -570,6 +622,7 @@ void fetchECData() {
     wmoId       = extractSWOBValue(xml,"wmo_synop_id");
     tcId        = extractSWOBValue(xml,"tc_id");
     mscId       = extractSWOBValue(xml,"msc_id");
+    rptType     = extractSWOBValue(xml,"rpt_typ");
     percAmt24   = extractSWOBValue(xml,"pcpn_amt_pst24hrs");
     percAmt6    = extractSWOBValue(xml,"pcpn_amt_pst6hrs");
     snowDpth    = extractSWOBValue(xml,"snw_dpth");
@@ -609,7 +662,16 @@ tornadoDetected = false;
       tornadoFlashCount = 0;
       tornadoLedOn = false;
 }
-
+funnelDetected = false;
+    Remark.toUpperCase();
+    if (Remark.indexOf("FUNNEL_CLOUD") >= 0) {
+      funnelDetected = true;
+    }
+    if (funnelDetected) {
+      funnelFlashActive = true;
+      funnelFlashCount = 0;
+      funnelLedOn = false;
+}
 presfrDetected = false;
     Remark.toUpperCase();
     if (Remark.indexOf("PRESFR") >= 0) {
@@ -631,6 +693,16 @@ presrrDetected = false;
       presrrFlashCount = 0;
       presrrLedOn = false;
 }
+froinDetected = false;
+    Remark.toUpperCase();
+    if (Remark.indexOf("FROIN") >= 0) {
+      froinDetected = true;
+    }
+    if (froinDetected) {
+      froinFlashActive = true;
+      froinFlashCount = 0;
+      froinLedOn = false;
+}
 
 //////////
 
@@ -644,6 +716,7 @@ presrrDetected = false;
     Serial.println("Station:" + stationName);
     Serial.println("icaoID:" + stationId);
     Serial.println("tcID:" + tcId);
+    Serial.println("rptType:" + rptType);
     Serial.println("WMO:"  + wmoId);
     Serial.println(" Temp: " + tempC);
     Serial.println(" Humi: " + humidity);
@@ -837,6 +910,7 @@ String decodeWeather(const String& c) {
   if (c=="28")  return "Haze";
   if (c=="27")  return "Smoke";
   if (c=="139")  return "Freezing Fog"; 
+  if (c=="167")  return "Freezing Mist"; // New??
 
   // ---- Drizzle ----
   if (c=="50")  return "Light Drizzle";
@@ -864,7 +938,7 @@ String decodeWeather(const String& c) {
   if (c=="71")  return "Snow";
   if (c=="72")  return "Heavy Snow";
   if (c=="79")  return "Light Snow";
-  if (c=="85")  return "Snow Showers";
+  if (c=="85")  return "Ice Crystals";
   if (c=="86")  return "HvySnow Shwrs";
   if (c=="88")  return "Snow Grains";
 
@@ -896,45 +970,68 @@ String decodeWeather(const String& c) {
   if (c=="300")  return "N/A @station";
 
   return " " + c; //return "unknown code " + c;
-  
 }
 
 char weatherIconFromCode(int code, int cloudBase1) {
 
-  tft.setTextColor(TFT_GOLD, TFT_BLACK);
-  if (cloudBase1 == 0) return 'N';   // SUN icon
+  // ---- THUNDERSTORM ----
+  if (code == 95 || code == 96 || code == 99 || code == 184 || code == 185) {
+    tft.setTextColor(TFT_RED, TFT_BLACK);
+    return 'K';
+  }
 
+  // ---- SNOW ----
+  if (code == 80 || code == 70 || code == 71 || code == 72 ||
+      code == 79 || code == 85 || code == 86 || code == 88 ||
+      code == 120 || code == 121 || code == 132) {
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    return 'L';
+  }
+
+  // ---- RAIN ----
+  if (code == 50 || code == 51 || code == 52 || code == 156 ||
+      code == 166 || code == 60 || code == 61 || code == 62 ||
+      code == 65 || code == 81 || code == 82) {
+    tft.setTextColor(TFT_BLUE, TFT_BLACK);
+    return 'M';
+  }
+
+  // ---- FOG / MIST ----
+  if (code == 10 || code == 40 || code == 41 || code == 45 ||
+      code == 48 || code == 28 || code == 27 || code == 139 || code == 167) {
+    tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+    return 'F';
+  }
+
+  // ---- CLEAR SKY ----
+  if (cloudBase1 == 0) {
+    tft.setTextColor(TFT_GOLD, TFT_BLACK);
+    return 'N';   // SUN
+  }
+  // ---- OVERCAST ----
+  if (cloudBase1 < 2500) {
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    return 'O';
+  }
+  // ---- PARTLY CLOUDY ----
+  if (cloudBase1 < 3500) {
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    return 'P';
+  }
+  // ---- FEW CLOUDS  ----
+  if (cloudBase1 < 9000) {
+    tft.setTextColor(TFT_GOLD, TFT_BLACK);
+    return 'C';
+  }
+  // ---- UNKNOWN ----
   tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-  if (cloudBase1 > 0) return 'C';    // CLOUD icon
-  
-  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  if (code == 10 || code == 40 || code == 41 || code ==45 || code == 48 || code == 28 || code == 27 || code == 139) return 'F';
-
-  // Rain
-  tft.setTextColor(TFT_BLUE, TFT_BLACK);
-  if (code == 50 || code == 51 || code == 52 || code == 156 || code == 166 || code == 60 || code == 61 || code == 62 || code == 65 || code == 81 || code == 82) return 'M';
-
-  // Snow
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  if (code == 80 || code == 70 || code == 71 || code == 72 || code == 79 || code == 85 || code == 86 || code == 88 || code == 120 || code == 121 || code == 132) return 'L';
-
-  // Thunderstorm
-  tft.setTextColor(TFT_RED, TFT_BLACK);
-  if (code == 95 || code == 96 || code == 99 || code == 184 || code == 185) return 'K';
+  return 'G';
 }
 
-void drawWeatherIcon(int wxCode, int cloudBase1, int x, int y) {
-  tft.loadFont(weatherfont60);
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.setCursor(x, y);
-
-  char icon = weatherIconFromCode(wxCode, cloudBase1);
-  tft.print(icon);
-}
 //PAGE ONE
 void drawPageOne() {
 
-  tft.fillScreen(TFT_BLACK); 
+  tft.fillScreen(TFT_BLACK);   // ← MUST BE FIRST
   // Header
   tft.setCursor(0,0);
   tft.setTextSize(1);
@@ -954,12 +1051,13 @@ void drawPageOne() {
   drawWordWrappedText(0, 64, tft.width(), decodeWeather(conditionText).c_str());
 
   // Debug condition code
+  //tft.setCursor(0,80);
   tft.setTextSize(1);
   tft.printf("\n\n");
   tft.setTextColor(TFT_PINK);
-  tft.printf("(%s)", conditionText.c_str());
+  tft.printf("(%s)", conditionText=="--"?"N/A":conditionText.c_str());
 
-  // Wind chill (only if <= 0.1°C)
+  // Wind chill (only if <= 0°C)
   tft.setCursor(-6,10);
   tft.setTextSize(3);
   float t = tempC.toFloat();
@@ -972,7 +1070,7 @@ void drawPageOne() {
   tft.setTextSize(2);
   uint16_t alertColor = getAlertColor(alertTitle);
   tft.setTextColor(alertColor);
-  drawWordWrappedText(0, 90, tft.width(), alertTitle.c_str()); 
+  drawWordWrappedText(0, 90, tft.width(), alertTitle.c_str()); //100
 
   // Aurora Notification
   if (auroraDetected) {
@@ -986,7 +1084,7 @@ void drawPageOne() {
     tft.setTextSize(1);
     tft.setTextColor(TFT_GREENYELLOW);
     tft.setCursor(0, 126);
-    tft.print("CONTRAILS - - - CONTRAILS ");
+    tft.print("CONTRAILS");
     }
 // TORNADO Notification
   if (tornadoDetected) {
@@ -995,7 +1093,13 @@ void drawPageOne() {
     tft.setCursor(0, 126);
     tft.print("TORNADO ><>< TORNADO ><>< TORNADO");
     }
-
+    // FUNNEL CLOUD Notification
+  if (funnelDetected) {
+    tft.setTextSize(1);
+    tft.setTextColor(TFT_RED);
+    tft.setCursor(0, 126);
+    tft.print("FUNNEL CLOUD ><>< FUNNEL CLOUD");
+    }
     // PRESFR Notification
   if (presfrDetected) {
     tft.setTextSize(1);
@@ -1012,10 +1116,18 @@ void drawPageOne() {
     tft.print("Pressure Rising Rapidly");
     }
 
+    // FROIN Notification
+  if (presrrDetected) {
+    tft.setTextSize(1);
+    tft.setTextColor(TFT_GREENYELLOW);
+    tft.setCursor(0, 126);
+    tft.print("Frost On Indicator");
+    }
+
   // ---- WEATHER ICON (DRAW LAST) ----
   tft.loadFont(weatherfont60);
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  tft.setCursor(198, 16);
+  tft.setCursor(192, 16);
   tft.print(weatherIconFromCode(wxCode.toInt(), cloudBase1.toInt()));
   tft.unloadFont();
 }
@@ -1032,7 +1144,9 @@ void drawPageTwo(){
   tft.printf("Vis:%skm\n",visibility.c_str());  //  visibility
   tft.setTextColor(TFT_SKYBLUE);
   tft.printf("Wind:%skm/h\n" ,windSpeed.c_str()); 
+  //tft.printf("Wind: %s km/h<%s>\n",windSpeed.c_str(),windCardinal.c_str());  // avg windspeed + avg wind direction
   tft.printf("Dir: < %s >\n",windCardinal.c_str());
+  //tft.printf("Gust:%skm/h",windGust.c_str()); // max wind gust when available
   tft.printf("Gust:%skm/h\n",windGust=="MSNG"?"--":windGust.c_str()); // max wind gust when available
 }
 //PAGE THREE
@@ -1041,14 +1155,24 @@ void drawPageThree(){
   tft.setTextSize(1);
   tft.setTextColor(TFT_GREEN);
   tft.printf("%s - %s @ %s\n\n",stationName.c_str(),stationId.c_str(),obsLocal.c_str());  // Weather Station Name
-  tft.setTextSize(3); 
+  tft.setTextSize(2); 
   tft.setTextColor(TFT_CYAN);
   tft.printf("wx1:%s\n", decodeWeather(conditionText).c_str());
   tft.printf("wx2:%s\n", decodeWeather(wxText2).c_str());
+  tft.setCursor(0,50);
+  tft.setTextSize(2);
+  float t = tempC.toFloat();
+  if (t <= -0.1) {  
+    tft.setTextColor(TFT_SKYBLUE);
+    tft.printf("Windchill:%.0f C", windChill(t, windSpeed.toFloat()));
+  }
+  tft.setTextSize(3); 
+  tft.setCursor(0,66);
   tft.setTextColor(TFT_WHITE);
-  tft.printf("Max24:%s C\n",maxTemp24.c_str()); 
-  tft.printf("Min24:%s C\n",minTemp24.c_str()); 
-  tft.printf("Dew:%s C\n",dewpoint.c_str()); // dewpoint
+  tft.printf("Max24:%s C\n",maxTemp24.c_str()); // max temp past 24hrs
+  tft.printf("Min24:%s C\n",minTemp24.c_str()); // min temp past 24hrs
+  tft.printf("Dew:%s C\n",dewpoint.c_str());    // dewpoint
+
    }
 
 //PAGE FOUR
@@ -1060,11 +1184,13 @@ void drawPageFour(){
    tft.setTextSize(3);
    tft.setTextColor(TFT_WHITE);
   tft.printf("CldCvr:%s %%\n",cloudCover.c_str()); // cloud cover 
-  tft.printf("CBs1:%s m\n", cloudBase1=="0"?"clear":cloudBase1.c_str()); // cloud ceiling 1 when available 
+  tft.printf("CBs1:%s m\n", cloudBase1=="0"?"clear":cloudBase1.c_str()); // cloud ceiling 1 when available // tft.printf("Clouds: %s %%\n\n",cloudCover.c_str()); 
+  //tft.printf("CBs1:%s m\n",cloudBase1.c_str()); // cloud ceiling 1 when available // tft.printf("Clouds: %s %%\n\n",cloudCover.c_str()); 
   tft.printf("CBs2:%s m\n",cloudBase2.c_str()); // cloud ceiling 2 when available
   tft.printf("CBs3:%s m\n",cloudBase3.c_str()); // cloud ceiling 3 when available
   tft.printf("VVis:%s m",vertVis.c_str()); // vertical visibility when available
-
+  //tft.printf("VertVis: %s m\n",vertVis=="MSNG"?"--":vertVis.c_str()); // vertical visibility when available
+  //tft.printf("BarPres: %s hPa %s hPa \n",pressure.c_str(),pressureSLP.c_str()); 
 
 }
 
@@ -1080,7 +1206,6 @@ void drawPageFive(){
   tft.printf("Snow:%scm\n",snowDpth.c_str());
   tft.printf("StP:%shPa\n",pressure.c_str());   // Station barometric pressure before sea level altitude ajustment
   tft.printf("SLP:%shPa\n",pressureSLP.c_str()); // barometric pressure after sea level ajustment
-  
 
 }
 
@@ -1094,6 +1219,7 @@ void drawPageSix(){
   tft.printf("NavCan Remark:\n");
   tft.setTextSize(3);
   drawWordWrappedText(0, 34, tft.width(),Remark.c_str());
+  //tft.printf("Rmk:%s\n",Remark.c_str());
 }
 
 void drawPageSeven(){
@@ -1102,6 +1228,7 @@ void drawPageSeven(){
   tft.setTextColor(TFT_GREEN);
   drawWordWrappedText(0, 0, tft.width(),stationName.c_str());
   tft.printf("\n");
+  //tft.printf("%s\n",stationName.c_str());
   tft.setTextSize(1);
   tft.printf("ICAO: ");
   tft.setTextSize(2);
@@ -1110,20 +1237,29 @@ void drawPageSeven(){
   tft.printf(" WIGOSsi: ");
   tft.setTextSize(2);
   tft.printf("%s\n", wmoId.c_str());
+  //tft.printf("WIS:%s\n", wmoId.c_str());
   tft.setTextSize(1);
   tft.printf("TC-id: ");
   tft.setTextSize(2);
   tft.printf("%s",tcId=="--"?"@@@":tcId.c_str()); 
+  //tft.printf("%s",tcId.c_str());
+  //("Gust:%skm/h\n",tcId=="--"?"--":tcId.c_str()); 
   tft.setTextSize(1);
   tft.printf(" MSC-id: ");
   tft.setTextSize(2);
   tft.printf("%s\n",mscId.c_str());
+  tft.setTextSize(1);
+  tft.printf("RptType: ");
+  tft.setTextSize(2);
+  tft.printf("%s\n",rptType=="0"?"Stnd":rptType.c_str(),rptType=="1"?"Rvsd":rptType.c_str());
   tft.setTextSize(1);
   tft.printf("Observation Time: \n");
   tft.setTextSize(3);
   tft.printf("  %s",obsLocal.c_str());
 
 }
+
+
 
 
 
