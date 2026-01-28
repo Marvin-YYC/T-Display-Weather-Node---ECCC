@@ -53,7 +53,7 @@ Use the top right search bar and then scroll to the bottom.  Look for 'follow', 
     IMPORTANT - one edit required for User_Setup_Select.h file uncomment this line.
 line 61 - #include <User_Setups/Setup25_TTGO_T_Display.h>    // Setup file for ESP32 and TTGO T-Display ST7789V SPI bus TFT
 
-Horizontal with RGB Alerts
+Horizontal with RGB Alerts VIDEO >
 https://github.com/user-attachments/assets/c89c0b80-be20-44ab-808d-949f07917e69
 
 Horizontal Layout
