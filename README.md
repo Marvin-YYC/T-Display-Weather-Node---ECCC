@@ -54,7 +54,7 @@ Use the top right search bar and then scroll to the bottom.  Look for 'follow', 
 line 61 - #include <User_Setups/Setup25_TTGO_T_Display.h>    // Setup file for ESP32 and TTGO T-Display ST7789V SPI bus TFT
 
 Horizontal with RGB Alerts
-![signal-2026-01-05-204349_006](https://github.com/user-attachments/assets/c1c86122-faa9-4fd7-beac-4dfb4fbb8947)
+
 
 Horizontal Layout
 ![signal-2026-01-05-204349](https://github.com/user-attachments/assets/7ce37b1f-3414-4995-a689-dc3c45fdd966)
