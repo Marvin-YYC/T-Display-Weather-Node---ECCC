@@ -1,0 +1,769 @@
+// Jan 29/26
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <TFT_eSPI.h>
+#include <time.h>
+#include "WeatherFont60.h"
+
+//Backlight
+const uint8_t brightnessLevels[] = { 4, 20, 60, 120, 180, 255 };
+const uint8_t NUM_LEVELS = sizeof(brightnessLevels);
+uint8_t brightnessIndex = 1;  
+#define BTN_BRIGHTNESS  0   // Left button
+const int pwmChannel = 0;
+#define BACKLIGHT_PIN 4
+#define BACKLIGHT_CHANNEL 0
+#define BACKLIGHT_FREQ 5000
+#define BACKLIGHT_RES 8  
+#define BUTTON_PIN 0   // TTGO Left front button controls screen brightness
+
+bool alertActive = false;
+bool alertJustAppeared = false;
+
+// ===== WiFi =====
+const char* SSID     = "YOUR_SSID_HERE"; // YOUR_SSID_HERE <<<<<<<<<<<<<<<<<<<EDIT
+const char* PASSWORD = "YOUR_SSID_PASSOWORD_HERE"; // YOUR_SSID_PASSOWORD_HERE  <<<<<<<<<<<<EDIT
+
+// ===== URLs =====
+//===== Weather Data ======
+const char* WEATHER_RSS_URL  = "https://weather.gc.ca/rss/weather/51.046_-114.057_e.xml"; // Calgary 
+
+//const char* WEATHER_RSS_URL  = "https://weather.gc.ca/rss/weather/53.536_-113.494_e.xml";  // Edmonton 
+
+//===== Alert Data =========
+const char* ALERTS_RSS_URL   = "https://weather.gc.ca/rss/battleboard/ab12_e.xml";   // Calgary  
+//<<your must use the url that indicates "battleboard" - -  alerts may not work correctly otherwise>>
+
+
+
+// ===== Update intervals (ms) =====
+const unsigned long WEATHER_INTERVAL = 900000UL; // update 15 min
+const unsigned long ALERTS_INTERVAL  = 1200000UL; //  update 20 minutes 1200000UL  // 5 min for test 300000UL
+unsigned long lastWeatherUpdate = 0;
+unsigned long lastAlertsUpdate  = 0;
+
+// ===== TFT =====
+TFT_eSPI tft = TFT_eSPI();
+
+// ===== Parsed Weather =====
+String ccObservedAt  = "";
+String ccCondition   = "";
+String ccTemperature = "";
+String ccPressure    = "";
+String ccWind        = "";
+String ccGust        = "";
+String ccHumidity    = "";
+String ccDewpoint    = "";
+String ccVisibility  = "";
+String ccWindChill   = "";
+String ccAQHI        = "";
+String ccUpdated     = "";
+String fcDayTitle   = "";
+String fcDaySummary = "";
+String fcNightTitle = "";
+String fcNightSummary = "";
+
+
+// ===== Alerts =====
+String alertTitle   = "";
+String alertSummary = "";
+
+// ===== Display paging =====
+enum Page { PAGE_ONE, PAGE_TWO, PAGE_THREE, PAGE_FOUR, PAGE_FIVE, ALERT_PAGE };
+Page currentPage = PAGE_ONE;
+unsigned long pageTimer = 0;
+const unsigned long PAGE_DURATION = 8000UL; // 10 seconds = 10000UL 8seconds = 8000
+
+    ////////////////////////////////////////////////////////////////////////
+// ===== Prototypes =====
+void connectWiFi();
+void fetchWeather();
+void fetchForecast24h(const String &xml);
+void fetchAlerts();
+void drawAlertPage();
+String extractXmlValue(const String &xml, const String &tag);
+String extractLabeledValue(const String &src, const String &label);
+uint16_t alertColorFor(const String &title);
+String formatObservedTime(String raw);
+
+void drawPageOne();
+void drawPageTwo();
+void drawPageThree();
+void drawPageFour();
+void drawPageFive();
+void drawAlertPage();
+
+  void showBootScreen() {
+      tft.fillScreen(TFT_BLACK);
+      tft.setTextDatum(MC_DATUM); 
+      tft.setTextColor(TFT_CYAN, TFT_BLACK);
+
+      tft.setTextSize(2);
+      tft.drawString("Third Planet", tft.width() / 2, 20);
+      tft.drawString("Weather Node", tft.width() / 2, 40);
+      tft.loadFont(weatherfont60);
+      tft.setTextColor(TFT_BLUE, TFT_BLACK);
+      tft.drawString("L                   M", tft.width() / 2, 64);
+      tft.unloadFont();
+      delay(1500);
+      tft.setTextColor(TFT_WHITE, TFT_BLACK);
+      tft.setTextSize(1);
+      tft.drawString("observation from:", tft.width() / 2, 60);
+      tft.drawString("Environment Canada", tft.width() / 2, 70);
+      delay(1500);
+      tft.drawString("Firmware running", tft.width() / 2, 100);
+      tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+      delay(1500);
+      tft.drawString("Initializing...", tft.width() / 2, 120);
+      delay(3500);
+      }
+
+// ===== Setup =====
+void setup() {
+  Serial.begin(115200);
+  tft.init();
+  tft.setRotation(1);
+  showBootScreen();
+  tft.fillScreen(TFT_BLACK);
+ 
+
+  pinMode(BTN_BRIGHTNESS, INPUT_PULLUP);
+  //pinMode(BTN_RIGHT, INPUT);
+  //lastInteractionTime = millis();
+  ledcSetup(BACKLIGHT_CHANNEL, BACKLIGHT_FREQ, BACKLIGHT_RES);
+  ledcAttachPin(BACKLIGHT_PIN, BACKLIGHT_CHANNEL);
+  ledcWrite(BACKLIGHT_CHANNEL, 40);  // Start at low brightness
+
+  connectWiFi();
+  fetchWeather();
+  fetchAlerts();
+
+  pageTimer = millis();
+  drawPageOne();
+}
+void handleBrightnessButton() {
+  static bool lastState = HIGH;
+  static unsigned long lastDebounce = 0;
+
+  bool current = digitalRead(BTN_BRIGHTNESS);
+
+  if (current != lastState) {
+    lastDebounce = millis();
+  }
+
+  if ((millis() - lastDebounce) > 50) { 
+    if (lastState == HIGH && current == LOW) {
+      brightnessIndex++;
+      if (brightnessIndex >= NUM_LEVELS) brightnessIndex = 0;
+
+      ledcWrite(pwmChannel, brightnessLevels[brightnessIndex]);
+
+      Serial.printf("Brightness: %d\n",
+        brightnessLevels[brightnessIndex]);
+    }
+  }
+
+  lastState = current;
+}
+
+bool isRealAlert(const String &title) {
+  String t = title;
+  t.toLowerCase();
+  return (
+    t.indexOf("red")   >= 0 ||
+    t.indexOf("orange")     >= 0 ||
+    t.indexOf("yellow")  >= 0 ||
+    t.indexOf("special") >= 0
+  );
+}
+// ===== Main Loop =====
+void loop() {
+  unsigned long now = millis();
+  handleBrightnessButton();
+
+  static bool lastAlertState = false;
+
+if (alertActive != lastAlertState) {
+  pageTimer = now;
+  currentPage = PAGE_ONE; // always start cycle on weather
+  tft.fillScreen(TFT_BLACK);
+  lastAlertState = alertActive;
+}
+
+  // Weather update
+  if (now - lastWeatherUpdate > WEATHER_INTERVAL) {
+    fetchWeather();
+    tft.fillScreen(TFT_BLACK);
+    lastWeatherUpdate = now;
+  }
+
+  // Alerts update
+  if (now - lastAlertsUpdate > ALERTS_INTERVAL) {
+    fetchAlerts();
+    lastAlertsUpdate = now;
+  }
+
+ // Page switching
+  if (now - pageTimer > PAGE_DURATION) {
+    pageTimer = now;
+
+    switch (currentPage) {
+      case PAGE_ONE:
+        currentPage = PAGE_TWO;
+        break;
+      case PAGE_TWO:
+        currentPage = PAGE_THREE;
+        break;
+      case PAGE_THREE:
+        currentPage = PAGE_FOUR;
+        break;
+      case PAGE_FOUR:
+        currentPage = PAGE_FIVE;
+        break;
+      case PAGE_FIVE:
+        currentPage = ALERT_PAGE;
+        break;
+      default:
+        currentPage = PAGE_ONE;
+        break;
+    }
+
+    tft.fillScreen(TFT_BLACK);
+  }
+
+  // Draw current page
+  if (currentPage == PAGE_ONE) {
+    drawPageOne();
+  }
+  else if (currentPage == PAGE_TWO) {
+    drawPageTwo();
+  }
+  else if (currentPage == PAGE_THREE) {
+    drawPageThree();
+  }
+  else if (currentPage == PAGE_FOUR) {
+    drawPageFour();
+  }
+  else if (currentPage == PAGE_FIVE) {
+    drawPageFive();
+  }
+  else {
+    drawAlertPage();
+  }
+ ///////////////////////////////////////////////////////////
+
+  delay(50); // light yield
+
+  //Brightness button
+  static bool lastBtn = HIGH;
+  bool btn = digitalRead(BTN_BRIGHTNESS);
+
+  if (lastBtn == HIGH && btn == LOW) {
+    brightnessIndex = (brightnessIndex + 1) % NUM_LEVELS;
+    ledcWrite(BACKLIGHT_CHANNEL, brightnessLevels[brightnessIndex]);
+
+    Serial.printf("Brightness level: %d\n",
+                  brightnessLevels[brightnessIndex]);
+
+    delay(250); // debounce
+  }
+  lastBtn = btn;
+}
+
+// ===== WiFi =====
+void connectWiFi() {
+  WiFi.begin(SSID, PASSWORD);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500); Serial.print(".");
+  }
+  Serial.println("\nWiFi connected!");
+}
+
+// ===== Fetch and Parse Weather =====
+void fetchWeather() {
+  HTTPClient http;
+  http.begin(WEATHER_RSS_URL);
+
+  int code = http.GET();
+  Serial.printf("Weather RSS HTTP code: %d\n", code);
+
+  if (code == 200) {
+    String xml = http.getString();
+    fetchForecast24h(xml);
+
+
+    // Find correct <entry> with current conditions
+    int pos = 0;
+    while (true) {
+      int start = xml.indexOf("<entry>", pos);
+      if (start == -1) break;
+      int end   = xml.indexOf("</entry>", start);
+      if (end == -1) break;
+
+      String entry = xml.substring(start, end);
+
+      // Category for current conditions
+      String entryTitle = extractXmlValue(entry, "title");
+
+        // Select the "Current Conditions" entry
+        if (!entryTitle.startsWith("Current Conditions")) {
+          pos = end + 8;
+          continue;
+        }
+      // Extract updated timestamp
+      ccUpdated = extractXmlValue(entry, "updated");
+      // Extract summary CDATA
+      String summary = extractXmlValue(entry, "summary");
+      
+      summary.replace("<![CDATA[", "");
+      summary.replace("]]>", "");
+      summary.replace("<br/>", "\n");
+      summary.replace("<br />", "\n");
+      summary.replace("<b>", "");
+      summary.replace("</b>", "");
+      summary.replace("&deg;C", ""); // add C 
+      summary.trim();
+
+      // Parse labeled values
+      ccObservedAt = formatObservedTime(
+                 extractLabeledValue(summary, "Observed at:")
+               );
+
+      //ccObservedAt  = extractLabeledValue(summary, "Observed at:");
+      ccCondition   = extractLabeledValue(summary, "Condition:");
+      ccTemperature = extractLabeledValue(summary, "Temperature:");
+      ccPressure    = extractLabeledValue(summary, "Pressure / Tendency:");
+      ccVisibility  = extractLabeledValue(summary, "Visibility:");
+      ccHumidity    = extractLabeledValue(summary, "Humidity:");
+      ccDewpoint    = extractLabeledValue(summary, "Dewpoint:");
+      ccWindChill   = extractLabeledValue(summary, "Wind Chill:");
+      ccWind        = extractLabeledValue(summary, "Wind:");
+      ccGust        = extractLabeledValue(summary, "Gust:");
+      ccAQHI        = extractLabeledValue(summary, "Air Quality Health Index:");
+
+      break;
+    }
+
+    Serial.println("Parsed Weather:");
+    Serial.println(ccObservedAt);
+    Serial.println(ccCondition);
+    Serial.println(ccTemperature);
+
+  }
+
+  http.end();
+}
+void fetchForecast24h(const String &xml) {
+
+  fcDayTitle = "";
+  fcDaySummary = "";
+  fcNightTitle = "";
+  fcNightSummary = "";
+
+  int pos = 0;
+  int found = 0;
+
+  while (true) {
+    int start = xml.indexOf("<entry>", pos);
+    if (start == -1) break;
+
+    int end = xml.indexOf("</entry>", start);
+    if (end == -1) break;
+
+    String entry = xml.substring(start, end);
+    pos = end + 8;
+
+    // Only forecast entries
+    if (entry.indexOf("Weather Forecasts") == -1) continue;
+
+    String title   = extractXmlValue(entry, "title");
+    String summary = extractXmlValue(entry, "summary");
+
+    // Clean HTML / CDATA
+    summary.replace("<![CDATA[", "");
+    summary.replace("]]>", "");
+    summary.replace("<br/>", "\n");
+    summary.replace("<br />", "\n");
+    summary.replace("<b>", "");
+    summary.replace("</b>", "");
+    summary.trim();
+
+    if (found == 0) {
+      fcDayTitle = title;
+      fcDaySummary = summary;
+    } else if (found == 1) {
+      fcNightTitle = title;
+      fcNightSummary = summary;
+      break;  // we only need 24h
+    }
+
+    found++;
+  }
+}
+
+
+// ===== Fetch and Parse Alerts =====
+void fetchAlerts() {
+  HTTPClient http;
+  http.begin(ALERTS_RSS_URL);
+  int code = http.GET();
+  Serial.printf("Alerts RSS HTTP code: %d\n", code);
+
+  if (code == 200) {
+    String xml = http.getString();
+    // Parse first alert entry
+    int pos = 0;
+    alertTitle = "";
+    alertSummary = "";
+
+    while (true) {
+      int start = xml.indexOf("<entry>", pos);
+      if (start == -1) break;
+      int end   = xml.indexOf("</entry>", start);
+      if (end == -1) break;
+
+      String entry = xml.substring(start, end);
+
+      String title = extractXmlValue(entry, "title");
+      String summaryHtml = extractXmlValue(entry, "summary");
+
+      // Clean CDATA HTML if present
+      summaryHtml.replace("<![CDATA[", "");
+      summaryHtml.replace("]]>", "");
+      summaryHtml.replace("<br/>", "\n");
+      summaryHtml.replace("<br />", "\n");
+      summaryHtml.replace("<b>", "");
+      summaryHtml.replace("</b>", "");
+      summaryHtml.trim();
+      
+      alertTitle = title;
+      alertSummary = summaryHtml;
+      break;
+    }
+      bool hadAlertBefore = alertActive;
+        alertActive = isRealAlert(alertTitle);
+        // Detect newly issued alert
+        alertJustAppeared = (alertActive && !hadAlertBefore);
+
+    Serial.printf("Alert title: '%s'\n", alertTitle.c_str());
+    Serial.printf("alertActive=%d alertJustAppeared=%d\n",alertActive, alertJustAppeared);
+
+    Serial.println("Parsed Alert:");
+    Serial.println(alertTitle);
+    Serial.println(alertSummary);
+  }
+  http.end();
+}
+
+char weatherIconFromCondition(const String &cond) {
+  String c = cond;
+  c.toLowerCase();
+
+  tft.setTextColor(TFT_GOLD, TFT_BLACK);
+  if (c.indexOf("mainly sunny") >= 0) return 'C'; // sun/cloud
+
+  tft.setTextColor(TFT_GOLD, TFT_BLACK);
+  if (c.indexOf("sunny") >= 0) return 'N'; // sun
+
+   tft.setTextColor(TFT_SILVER, TFT_BLACK);
+  if (c.indexOf("mainly clear") >= 0) return 'G'; // moon/cloud
+
+  tft.setTextColor(TFT_SILVER, TFT_BLACK);
+  if (c.indexOf("clear") >= 0) return 'I'; // moon
+
+  tft.setTextColor(TFT_GOLD, TFT_BLACK);
+  if (c.indexOf("partly cloudy") >= 0) return 'C'; // sun/cloud
+
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  if (c.indexOf("mostly cloudy") >= 0) return 'P'; // single cloud
+
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  if (c.indexOf("cloudy") >= 0) return 'O'; // overcast - double cloud
+
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  if (c.indexOf("fog") >= 0 || c.indexOf("mist") >= 0) return 'F'; // fog cloud
+
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  if (c.indexOf("heavy snow") >= 0) return 'D'; // snow flake
+
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  if (c.indexOf("snow") >= 0) return 'L'; // snow cloud
+
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  if (c.indexOf("heavy rain") >= 0) return 'B'; // rain
+
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  if (c.indexOf("rain") >= 0) return 'M'; // rain cloud
+
+  tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+  if (c.indexOf("thunderstorm") >= 0)  return 'K';
+  
+    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+      return 'J'; // unknown umbrella
+}
+
+String formatObservedTime(String raw) {
+  raw.replace("Observed at:", "");
+  raw.trim();
+
+  const char* days[] = {
+    " Monday", " Tuesday", " Wednesday",
+    " Thursday", " Friday", " Saturday", " Sunday"
+  };
+
+  for (int i = 0; i < 7; i++) {
+    int idx = raw.indexOf(days[i]);
+    if (idx > 0) {
+      raw = raw.substring(0, idx);
+      break;
+    }
+  }
+
+  raw.replace("Calgary Int'l Airport", "Calgary");
+  raw.trim();
+
+  return raw;
+}
+
+
+void drawWordWrappedText(int x, int y, int maxWidth, const String &text) {
+
+  int cursorX = x;
+  int cursorY = y;
+
+  int lineHeight = tft.fontHeight();
+  int spaceWidth = tft.textWidth(" ");
+
+  tft.setCursor(cursorX, cursorY);
+
+  int i = 0;
+  while (i < text.length()) {
+
+    // Explicit newline
+    if (text[i] == '\n') {
+      cursorX = x;
+      cursorY += lineHeight;
+      tft.setCursor(cursorX, cursorY);
+      i++;
+      continue;
+    }
+
+    // Extract next word
+    int start = i;
+    while (i < text.length() && text[i] != ' ' && text[i] != '\n') i++;
+
+    String word = text.substring(start, i);
+    int wordWidth = tft.textWidth(word);
+
+    // Wrap if needed
+    if (cursorX != x && cursorX + wordWidth > x + maxWidth) {
+      cursorX = x;
+      cursorY += lineHeight;
+      tft.setCursor(cursorX, cursorY);
+    }
+
+    // Draw word
+    tft.print(word);
+    cursorX += wordWidth;
+
+    // Handle space AFTER word
+    if (i < text.length() && text[i] == ' ') {
+      // Only draw space if it fits on this line
+      if (cursorX + spaceWidth <= x + maxWidth) {
+        tft.print(" ");
+        cursorX += spaceWidth;
+      } else {
+        cursorX = x;
+        cursorY += lineHeight;
+        tft.setCursor(cursorX, cursorY);
+      }
+      i++;  // consume space
+    }
+  }
+}
+
+
+// ===== Display Functions =====
+void drawPageOne() {
+  tft.setTextSize(2);
+  tft.setTextColor(TFT_GREEN);
+  drawWordWrappedText(0, 0, tft.width(), ccObservedAt);
+ 
+  if (ccCondition.length()) {
+    tft.setTextSize(3);
+    tft.setTextColor(TFT_CYAN);
+    drawWordWrappedText(0, 20, tft.width(), ccCondition);
+    //tft.println("\n");
+    //tft.printf("%s\n", ccCondition.c_str());
+  }
+  if (ccTemperature.length()) {
+    tft.setTextSize(6);
+    tft.setTextColor(TFT_WHITE);
+    tft.setCursor(0, 64);
+    tft.printf("%s\n", ccTemperature.c_str());
+  }
+   if (ccWindChill.length()) {
+    tft.setTextSize(1);
+    tft.setTextColor(TFT_SKYBLUE);
+    tft.printf("Windchill: ");
+    tft.setTextSize(3);
+    //tft.setTextColor(TFT_SKYBLUE);
+    tft.printf("%s C", ccWindChill.c_str());
+  }
+  // ---- WEATHER ICON (DRAW LAST) ----
+ char icon = weatherIconFromCondition(ccCondition);
+  tft.loadFont(weatherfont60);
+  //tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setCursor(186, 64);
+  tft.print(icon);
+  tft.unloadFont();
+
+}
+
+  void drawPageTwo(){
+  //tft.setTextSize(2);
+  
+  //tft.setCursor(0, 0);
+  
+  if (ccPressure.length()) {
+    tft.setTextSize(2);
+    tft.setTextColor(TFT_WHITE);
+    tft.setCursor(0, 0);
+    tft.printf("BarPress:\n");
+    tft.setTextSize(3);
+    tft.setTextColor(TFT_WHITE);
+    //tft.setCursor(0, 0);
+    tft.printf("    %s\n", ccPressure.c_str());
+  }
+
+  if (ccWind.length()) {
+    tft.setTextSize(2);
+    tft.setCursor(0, 66);
+    tft.setTextColor(TFT_SKYBLUE);
+    tft.printf("Wind:\n");
+    tft.setTextSize(3);
+    drawWordWrappedText(0, 86, tft.width(), ccWind);
+    //tft.printf("%s\n", ccWind.c_str());
+  }
+}
+
+  void drawPageThree(){
+  tft.setTextSize(1);
+  tft.setTextColor(TFT_WHITE);
+  tft.setCursor(0, 0);
+  tft.printf("Humidity:\n");
+  if (ccHumidity.length()) {
+    tft.setTextSize(3);
+    tft.setTextColor(TFT_WHITE);
+    //tft.setCursor(0, 50);
+    tft.printf("     %s\n", ccHumidity.c_str());
+  }
+  tft.setTextSize(1);
+tft.printf("Visibility:\n");
+  if (ccVisibility.length()) {
+    tft.setTextSize(3);
+    tft.printf("     %s\n", ccVisibility.c_str());
+  }
+    tft.setTextSize(1);
+tft.printf("Dewpoint:\n");
+  if (ccDewpoint.length()) {
+    tft.setTextSize(3);
+    tft.printf("     %s C\n", ccDewpoint.c_str());
+  }
+  if (ccAQHI.length()) {
+    tft.setTextSize(1);
+tft.printf("Air Quality HI:\n");
+    tft.setTextSize(3);
+    //tft.setTextColor(TFT_VIOLET);
+    tft.printf("     {%s}\n", ccAQHI.c_str());
+  }
+}
+
+void drawPageFour(){
+  tft.setTextSize(3);
+  tft.setTextColor(TFT_GREEN);
+  drawWordWrappedText(0, 0, tft.width(), fcDayTitle);
+
+  //drawWordWrappedText(0, 0, tft.width(), fcNightTitle);
+  //tft.printf("%s\n", fcDayTitle.c_str());
+  //drawWordWrappedText(0, 0, tft.width(), fcDaySummary);
+  //fcDayTitle
+  //fcDaySummary
+  //fcNightTitle
+  //fcNightSummary 
+  
+}
+void drawPageFive(){
+  tft.setTextSize(3);
+  tft.setTextColor(TFT_VIOLET);
+  drawWordWrappedText(0, 0, tft.width(), fcNightTitle);
+
+}
+
+/*
+tft.setTextSize(1);
+  uint16_t c = alertColorFor(alertTitle);
+  tft.setTextColor(c);
+  tft.setCursor(0, 210); // 180
+  tft.println("ALERT > > >");
+  tft.setTextSize(1);
+  drawWordWrappedText(0, 220, tft.width(), alertTitle); // 190
+  //tft.printf("%s  \n\n", alertTitle.c_str());
+  //tft.setTextColor(c);
+  //drawWordWrappedText(0, 218, tft.width(), alertSummary);
+  //tft.printf("%s\n", alertSummary.c_str());
+
+}
+*/ ////////////////////////////////////////////////////////////////////////////////////
+void drawAlertPage() {
+  //tft.fillRect(0, 0, tft.width(), 80, TFT_DARKGREY);
+  tft.setTextSize(3);
+  //tft.setTextColor(TFT_YELLOW);
+  //tft.setCursor(0, 0);
+  //tft.println("ALERT>>");
+  uint16_t c = alertColorFor(alertTitle);
+  tft.setTextColor(c);
+  drawWordWrappedText(0, 0, tft.width(), alertTitle);
+  //tft.setTextSize(3);
+  //tft.printf("%s\n", alertTitle.c_str());
+  //tft.setTextColor(c);
+  //tft.setTextSize(2);
+  //drawWordWrappedText(0, 100, tft.width(), alertSummary);
+  //tft.printf("%s\n", alertSummary.c_str());
+}
+  //////////////////////////////////////////////////
+
+  uint16_t alertColorFor(const String &title) {
+  String t = title;
+  t.toLowerCase();
+if (t.indexOf("red") >= 0) return TFT_RED;
+  if (t.indexOf("orange") >= 0) return TFT_ORANGE;
+  if (t.indexOf("yellow") >= 0) return TFT_YELLOW;
+  if (t.indexOf("special") >= 0) return TFT_BLUE;
+
+  return TFT_DARKGREY;
+}
+
+// ===== XML Helpers =====
+String extractXmlValue(const String &xml, const String &tag) {
+  String open  = "<" + tag;
+  int idx = xml.indexOf(open);
+  if (idx == -1) return "";
+  idx = xml.indexOf(">", idx);
+  if (idx == -1) return "";
+  idx++;
+  int end = xml.indexOf("</" + tag + ">", idx);
+  if (end == -1) return "";
+  return xml.substring(idx, end);
+}
+
+String extractLabeledValue(const String &src, const String &label) {
+  int start = src.indexOf(label);
+  if (start == -1) return "";
+  start += label.length();
+  int end = src.indexOf('\n', start);
+  if (end == -1) end = src.length();
+  String val = src.substring(start, end);
+  val.trim();
+  return val;
+}
