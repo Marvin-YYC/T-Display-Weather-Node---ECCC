@@ -21,8 +21,8 @@ bool alertActive = false;
 bool alertJustAppeared = false;
 
 // ===== WiFi =====
-const char* SSID     = "YOUR_SSID_HERE"; // YOUR_SSID_HERE <<<<<<<<<<<<<<<<<<<EDIT
-const char* PASSWORD = "YOUR_SSID_PASSOWORD_HERE"; // YOUR_SSID_PASSOWORD_HERE  <<<<<<<<<<<<EDIT
+const char* SSID     = "YOUR_SSID_HERE";  //  YOUR_SSID_HERE  >> EDIT EDIT
+const char* PASSWORD = "YOUR_SSID_PASSWORD_HERE"; // YOUR_SSID_PASSWORD_HERE >> EDIT EDIT
 
 // ===== URLs =====
 //===== Weather Data ======
@@ -34,7 +34,8 @@ const char* WEATHER_RSS_URL  = "https://weather.gc.ca/rss/weather/51.046_-114.05
 const char* ALERTS_RSS_URL   = "https://weather.gc.ca/rss/battleboard/ab12_e.xml";   // Calgary  
 //<<your must use the url that indicates "battleboard" - -  alerts may not work correctly otherwise>>
 
-
+//const char* ALERTS_RSS_URL   = "https://weather.gc.ca/rss/battleboard/nl5_e.xml"; // test
+//const char* ALERTS_RSS_URL   = "https://weather.gc.ca/rss/battleboard/bcrm28_e.xml"; // test 
 
 // ===== Update intervals (ms) =====
 const unsigned long WEATHER_INTERVAL = 900000UL; // update 15 min
@@ -58,10 +59,10 @@ String ccVisibility  = "";
 String ccWindChill   = "";
 String ccAQHI        = "";
 String ccUpdated     = "";
-String fcDayTitle   = "";
-String fcDaySummary = "";
-String fcNightTitle = "";
-String fcNightSummary = "";
+String fc6hrTitle   = "";
+String fc6hrSummary = "";
+String fc12hrTitle = "";
+String fc12hrSummary = "";
 
 
 // ===== Alerts =====
@@ -132,7 +133,7 @@ void setup() {
   //lastInteractionTime = millis();
   ledcSetup(BACKLIGHT_CHANNEL, BACKLIGHT_FREQ, BACKLIGHT_RES);
   ledcAttachPin(BACKLIGHT_PIN, BACKLIGHT_CHANNEL);
-  ledcWrite(BACKLIGHT_CHANNEL, 40);  // Start at low brightness
+  ledcWrite(BACKLIGHT_CHANNEL, 20);  // Start at low brightness
 
   connectWiFi();
   fetchWeather();
@@ -355,10 +356,10 @@ void fetchWeather() {
 }
 void fetchForecast24h(const String &xml) {
 
-  fcDayTitle = "";
-  fcDaySummary = "";
-  fcNightTitle = "";
-  fcNightSummary = "";
+  fc6hrTitle = "";
+  fc6hrSummary = "";
+  fc12hrTitle = "";
+  fc12hrSummary = "";
 
   int pos = 0;
   int found = 0;
@@ -389,11 +390,11 @@ void fetchForecast24h(const String &xml) {
     summary.trim();
 
     if (found == 0) {
-      fcDayTitle = title;
-      fcDaySummary = summary;
+      fc6hrTitle = title;
+      fc6hrSummary = summary;
     } else if (found == 1) {
-      fcNightTitle = title;
-      fcNightSummary = summary;
+      fc12hrTitle = title;
+      fc12hrSummary = summary;
       break;  // we only need 24h
     }
 
@@ -471,11 +472,11 @@ char weatherIconFromCondition(const String &cond) {
   tft.setTextColor(TFT_SILVER, TFT_BLACK);
   if (c.indexOf("clear") >= 0) return 'I'; // moon
 
-  tft.setTextColor(TFT_GOLD, TFT_BLACK);
-  if (c.indexOf("partly cloudy") >= 0) return 'C'; // sun/cloud
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  if (c.indexOf("partly cloudy") >= 0) return 'P'; // single cloud
 
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  if (c.indexOf("mostly cloudy") >= 0) return 'P'; // single cloud
+  if (c.indexOf("mostly cloudy") >= 0) return 'O'; // overcast - double cloud
 
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   if (c.indexOf("cloudy") >= 0) return 'O'; // overcast - double cloud
@@ -680,41 +681,24 @@ tft.printf("Air Quality HI:\n");
 }
 
 void drawPageFour(){
-  tft.setTextSize(3);
+  tft.setTextSize(2);
   tft.setTextColor(TFT_GREEN);
-  drawWordWrappedText(0, 0, tft.width(), fcDayTitle);
-
-  //drawWordWrappedText(0, 0, tft.width(), fcNightTitle);
-  //tft.printf("%s\n", fcDayTitle.c_str());
-  //drawWordWrappedText(0, 0, tft.width(), fcDaySummary);
-  //fcDayTitle
-  //fcDaySummary
-  //fcNightTitle
-  //fcNightSummary 
+  drawWordWrappedText(0, 0, tft.width(), fc6hrTitle);
+   tft.setTextColor(TFT_WHITE);
+  tft.setTextSize(2);
+  drawWordWrappedText(0, 40, tft.width(), fc6hrSummary);  // NO ROOM FOR BOTH, CHOSE ONE AND MAKE IT LARGER FONT AND REMOVE THE OTHER
+  
   
 }
 void drawPageFive(){
-  tft.setTextSize(3);
-  tft.setTextColor(TFT_VIOLET);
-  drawWordWrappedText(0, 0, tft.width(), fcNightTitle);
+  tft.setTextSize(2);
+  tft.setTextColor(TFT_GREEN);
+  drawWordWrappedText(0, 0, tft.width(), fc12hrTitle);
+   tft.setTextColor(TFT_WHITE);
+  tft.setTextSize(2);
+  drawWordWrappedText(0, 40, tft.width(), fc12hrSummary);  // NO ROOM FOR BOTH, CHOSE ONE AND MAKE IT LARGER FONT AND REMOVE THE OTHER
 
 }
-
-/*
-tft.setTextSize(1);
-  uint16_t c = alertColorFor(alertTitle);
-  tft.setTextColor(c);
-  tft.setCursor(0, 210); // 180
-  tft.println("ALERT > > >");
-  tft.setTextSize(1);
-  drawWordWrappedText(0, 220, tft.width(), alertTitle); // 190
-  //tft.printf("%s  \n\n", alertTitle.c_str());
-  //tft.setTextColor(c);
-  //drawWordWrappedText(0, 218, tft.width(), alertSummary);
-  //tft.printf("%s\n", alertSummary.c_str());
-
-}
-*/ ////////////////////////////////////////////////////////////////////////////////////
 void drawAlertPage() {
   //tft.fillRect(0, 0, tft.width(), 80, TFT_DARKGREY);
   tft.setTextSize(3);
@@ -741,7 +725,7 @@ if (t.indexOf("red") >= 0) return TFT_RED;
   if (t.indexOf("yellow") >= 0) return TFT_YELLOW;
   if (t.indexOf("special") >= 0) return TFT_BLUE;
 
-  return TFT_DARKGREY;
+  return TFT_WHITE; /// TFT_DARKGREY
 }
 
 // ===== XML Helpers =====
