@@ -9,7 +9,7 @@
 //Backlight
 const uint8_t brightnessLevels[] = { 4, 20, 60, 120, 180, 255 };
 const uint8_t NUM_LEVELS = sizeof(brightnessLevels);
-uint8_t brightnessIndex = 2;  // start med bright
+uint8_t brightnessIndex = 1; 
 #define BTN_BRIGHTNESS  0   // Left button
 const int pwmChannel = 0;
 #define BACKLIGHT_PIN 4
@@ -82,8 +82,13 @@ const char* CurrWXURL ="https://dd.weather.gc.ca/today/observations/swob-ml/late
 // const char* CurrWXURL ="https://dd.weather.gc.ca/today/observations/swob-ml/latest/CPCI-AUTO-minute-swob.xml"; //CPCI ~ CALGARY INT'L CS, AB - AUTO
 // const char* CurrWXURL ="https://dd.weather.gc.ca/today/observations/swob-ml/latest/CYBW-AUTO-swob.xml";    // CYBW ~ Calgary/Springbank, AB - AUTO
 
+
 // ECCC Weather Alerts ATOM RSS feed
 const char* ALERTS_URL = "https://weather.gc.ca/rss/battleboard/ab12_e.xml"; // CYYC  Calgary, AB
+
+//const char* ALERTS_URL = "https://weather.gc.ca/rss/battleboard/nu3_e.xml"; 
+//const char* ALERTS_URL = "https://weather.gc.ca/rss/battleboard/abrm7027_h_e.xml"; 
+
 
 // Timing
 const unsigned long UPDATE_INTERVAL = 900000UL;  // 15 min = 900000UL//
@@ -150,7 +155,6 @@ void showBootScreen() {
   tft.fillScreen(TFT_BLACK);
   tft.setTextDatum(MC_DATUM); 
   tft.setTextColor(TFT_CYAN, TFT_BLACK);
-
   tft.setTextSize(2);
   tft.drawString("Third Planet", tft.width() / 2, 20);
   tft.drawString("Weather Node", tft.width() / 2, 40);
@@ -182,10 +186,11 @@ void setup() {
   screenWidth = tft.width();
   pinMode(BTN_BRIGHTNESS, INPUT_PULLUP);
   pinMode(BTN_RIGHT, INPUT);
+  //lastInteractionTime = millis();
 
   ledcSetup(BACKLIGHT_CHANNEL, BACKLIGHT_FREQ, BACKLIGHT_RES);
   ledcAttachPin(BACKLIGHT_PIN, BACKLIGHT_CHANNEL);
-  ledcWrite(BACKLIGHT_CHANNEL, 60);  // Start at medium low brightness
+  ledcWrite(BACKLIGHT_CHANNEL, 20);  // Start at low brightness
   //LED
   pinMode(LED_R, OUTPUT);
   pinMode(LED_G, OUTPUT);
@@ -307,7 +312,7 @@ void handleFunnelLED() {
 
   if (now - funnelLastToggle >= 600) { // slow flash
     funnelLastToggle = now;
-    funnelLedOn = !funneloLedOn;
+    funnelLedOn = !funnelLedOn;
 
     if (funnelLedOn) {
       digitalWrite(LED_R, HIGH);
@@ -491,7 +496,7 @@ void loop() {
   if (now - lastUpdate > UPDATE_INTERVAL) {
     fetchECData();
     lastUpdate = now;
-    pageNeedsRedraw = true;   // ✅ request redraw
+    pageNeedsRedraw = true;   // 
   }
 
   // ----- Alert update -----
@@ -539,7 +544,7 @@ void loop() {
         break;
     }
 
-    pageNeedsRedraw = false;  
+    pageNeedsRedraw = false;  // 
   }
 
   delay(50);
@@ -972,7 +977,7 @@ String decodeWeather(const String& c) {
   return " " + c; //return "unknown code " + c;
 }
 
-char weatherIconFromCode(int code, int cloudBase1) {
+char weatherIconFromCode(int code, int cloudBase1, int cloudCover) {
 
   // ---- THUNDERSTORM ----
   if (code == 95 || code == 96 || code == 99 || code == 184 || code == 185) {
@@ -1002,30 +1007,43 @@ char weatherIconFromCode(int code, int cloudBase1) {
     tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
     return 'F';
   }
-
-  // ---- CLEAR SKY ----
+    // ---- CLEAR SKY ----
   if (cloudBase1 == 0) {
-    tft.setTextColor(TFT_GOLD, TFT_BLACK);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
     return 'N';   // SUN
   }
-  // ---- OVERCAST ----
-  if (cloudBase1 < 2500) {
+  
+  if (cloudCover >= 75) {
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  return 'O'; // overcast - mostly cloudy > double clouds
+  }
+  else if (cloudCover >= 40) {
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    return 'O';
+    return 'P'; // partly cloudy >single cloud
   }
-  // ---- PARTLY CLOUDY ----
-  if (cloudBase1 < 3500) {
+  else {
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    return 'P';
+    return 'C'; // few clouds > sun with cloud
   }
-  // ---- FEW CLOUDS  ----
-  if (cloudBase1 < 9000) {
-    tft.setTextColor(TFT_GOLD, TFT_BLACK);
-    return 'C';
+
+/*
+  // ---- CLEAR SKY ----
+  if (cloudBase1 == 0) {
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    return 'N';   // SUN
   }
-  // ---- UNKNOWN ----
-  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-  return 'G';
+   if (cloudCover == 100) {
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    return 'O'; // OVERCAST DOUBLE CLOUD
+  }
+    if (cloudCover > 75) {
+      tft.setTextColor(TFT_WHITE, TFT_BLACK);
+      return 'P'; // SINGLE CLOUD
+    }
+    // ---- ELSE ----
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    return 'C'; // FEW CLOUDS
+    */      /////////////////////////
 }
 
 //PAGE ONE
@@ -1117,18 +1135,24 @@ void drawPageOne() {
     }
 
     // FROIN Notification
-  if (presrrDetected) {
+  if (froinDetected) {
     tft.setTextSize(1);
     tft.setTextColor(TFT_GREENYELLOW);
     tft.setCursor(0, 126);
     tft.print("Frost On Indicator");
     }
 
+
+  //tft.setCursor(0,126);
+  //tft.setTextSize(1);
+  //tft.setTextColor(TFT_GREENYELLOW);
+  //tft.printf("* * AURORA BOREALIS AURORA BOREALIS * *");
+
   // ---- WEATHER ICON (DRAW LAST) ----
   tft.loadFont(weatherfont60);
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   tft.setCursor(192, 16);
-  tft.print(weatherIconFromCode(wxCode.toInt(), cloudBase1.toInt()));
+  tft.print(weatherIconFromCode(wxCode.toInt(), cloudBase1.toInt(), cloudCover.toInt()));
   tft.unloadFont();
 }
 
@@ -1159,6 +1183,7 @@ void drawPageThree(){
   tft.setTextColor(TFT_CYAN);
   tft.printf("wx1:%s\n", decodeWeather(conditionText).c_str());
   tft.printf("wx2:%s\n", decodeWeather(wxText2).c_str());
+  // Wind chill (only if <= 0°C)
   tft.setCursor(0,50);
   tft.setTextSize(2);
   float t = tempC.toFloat();
@@ -1258,7 +1283,6 @@ void drawPageSeven(){
   tft.printf("  %s",obsLocal.c_str());
 
 }
-
 
 
 
