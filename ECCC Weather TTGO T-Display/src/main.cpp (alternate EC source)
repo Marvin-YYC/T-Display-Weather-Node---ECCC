@@ -20,9 +20,10 @@ const int pwmChannel = 0;
 bool alertActive = false;
 bool alertJustAppeared = false;
 
+
 // ===== WiFi =====
-const char* SSID     = "YOUR_SSID_HERE";  //  YOUR_SSID_HERE  >> EDIT EDIT
-const char* PASSWORD = "YOUR_SSID_PASSWORD_HERE"; // YOUR_SSID_PASSWORD_HERE >> EDIT EDIT
+const char* SSID     = "YOUR_SSID";  /// EDIT YOUR SSID
+const char* PASSWORD = "YOUR_SSID_PASSWORD";  /// EDIT YOUR PASSWORD
 
 // ===== URLs =====
 //===== Weather Data ======
@@ -34,12 +35,12 @@ const char* WEATHER_RSS_URL  = "https://weather.gc.ca/rss/weather/51.046_-114.05
 const char* ALERTS_RSS_URL   = "https://weather.gc.ca/rss/battleboard/ab12_e.xml";   // Calgary  
 //<<your must use the url that indicates "battleboard" - -  alerts may not work correctly otherwise>>
 
-//const char* ALERTS_RSS_URL   = "https://weather.gc.ca/rss/battleboard/nl5_e.xml"; // test
+//const char* ALERTS_RSS_URL   = "https://weather.gc.ca/rss/battleboard/bcrm10_e.xml"; // test
 //const char* ALERTS_RSS_URL   = "https://weather.gc.ca/rss/battleboard/bcrm28_e.xml"; // test 
 
 // ===== Update intervals (ms) =====
 const unsigned long WEATHER_INTERVAL = 900000UL; // update 15 min
-const unsigned long ALERTS_INTERVAL  = 1200000UL; //  update 20 minutes 1200000UL  // 5 min for test 300000UL
+const unsigned long ALERTS_INTERVAL  = 1200000UL; //  update 20 minutes 1200000UL
 unsigned long lastWeatherUpdate = 0;
 unsigned long lastAlertsUpdate  = 0;
 
@@ -82,6 +83,7 @@ void fetchWeather();
 void fetchForecast24h(const String &xml);
 void fetchAlerts();
 void drawAlertPage();
+
 String extractXmlValue(const String &xml, const String &tag);
 String extractLabeledValue(const String &src, const String &label);
 uint16_t alertColorFor(const String &title);
@@ -116,7 +118,7 @@ void drawAlertPage();
       tft.setTextColor(TFT_YELLOW, TFT_BLACK);
       delay(1500);
       tft.drawString("Initializing...", tft.width() / 2, 120);
-      delay(3500);
+      delay(1500);
       }
 
 // ===== Setup =====
@@ -129,8 +131,6 @@ void setup() {
  
 
   pinMode(BTN_BRIGHTNESS, INPUT_PULLUP);
-  //pinMode(BTN_RIGHT, INPUT);
-  //lastInteractionTime = millis();
   ledcSetup(BACKLIGHT_CHANNEL, BACKLIGHT_FREQ, BACKLIGHT_RES);
   ledcAttachPin(BACKLIGHT_PIN, BACKLIGHT_CHANNEL);
   ledcWrite(BACKLIGHT_CHANNEL, 20);  // Start at low brightness
@@ -167,26 +167,15 @@ void handleBrightnessButton() {
   lastState = current;
 }
 
-bool isRealAlert(const String &title) {
-  String t = title;
-  t.toLowerCase();
-  return (
-    t.indexOf("red")   >= 0 ||
-    t.indexOf("orange")     >= 0 ||
-    t.indexOf("yellow")  >= 0 ||
-    t.indexOf("special") >= 0
-  );
-}
 // ===== Main Loop =====
 void loop() {
   unsigned long now = millis();
   handleBrightnessButton();
-
   static bool lastAlertState = false;
 
 if (alertActive != lastAlertState) {
   pageTimer = now;
-  currentPage = PAGE_ONE; // always start cycle on weather
+  currentPage = PAGE_ONE;
   tft.fillScreen(TFT_BLACK);
   lastAlertState = alertActive;
 }
@@ -212,18 +201,23 @@ if (alertActive != lastAlertState) {
       case PAGE_ONE:
         currentPage = PAGE_TWO;
         break;
+
       case PAGE_TWO:
         currentPage = PAGE_THREE;
         break;
+
       case PAGE_THREE:
         currentPage = PAGE_FOUR;
         break;
+
       case PAGE_FOUR:
         currentPage = PAGE_FIVE;
         break;
+
       case PAGE_FIVE:
         currentPage = ALERT_PAGE;
         break;
+
       default:
         currentPage = PAGE_ONE;
         break;
@@ -402,7 +396,6 @@ void fetchForecast24h(const String &xml) {
   }
 }
 
-
 // ===== Fetch and Parse Alerts =====
 void fetchAlerts() {
   HTTPClient http;
@@ -441,21 +434,16 @@ void fetchAlerts() {
       alertSummary = summaryHtml;
       break;
     }
-      bool hadAlertBefore = alertActive;
-        alertActive = isRealAlert(alertTitle);
-        // Detect newly issued alert
-        alertJustAppeared = (alertActive && !hadAlertBefore);
 
     Serial.printf("Alert title: '%s'\n", alertTitle.c_str());
     Serial.printf("alertActive=%d alertJustAppeared=%d\n",alertActive, alertJustAppeared);
-
     Serial.println("Parsed Alert:");
     Serial.println(alertTitle);
     Serial.println(alertSummary);
   }
   http.end();
 }
-
+ 
 char weatherIconFromCondition(const String &cond) {
   String c = cond;
   c.toLowerCase();
@@ -600,7 +588,7 @@ void drawPageOne() {
   if (ccTemperature.length()) {
     tft.setTextSize(6);
     tft.setTextColor(TFT_WHITE);
-    tft.setCursor(0, 64);
+    tft.setCursor(0, 66); // 0, 64
     tft.printf("%s\n", ccTemperature.c_str());
   }
    if (ccWindChill.length()) {
@@ -615,7 +603,7 @@ void drawPageOne() {
  char icon = weatherIconFromCondition(ccCondition);
   tft.loadFont(weatherfont60);
   //tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.setCursor(186, 64);
+  tft.setCursor(186, 66);
   tft.print(icon);
   tft.unloadFont();
 
@@ -633,7 +621,6 @@ void drawPageOne() {
     tft.printf("BarPress:\n");
     tft.setTextSize(3);
     tft.setTextColor(TFT_WHITE);
-    //tft.setCursor(0, 0);
     tft.printf("    %s\n", ccPressure.c_str());
   }
 
@@ -644,7 +631,6 @@ void drawPageOne() {
     tft.printf("Wind:\n");
     tft.setTextSize(3);
     drawWordWrappedText(0, 86, tft.width(), ccWind);
-    //tft.printf("%s\n", ccWind.c_str());
   }
 }
 
@@ -653,101 +639,80 @@ void drawPageOne() {
   tft.setTextColor(TFT_WHITE);
   tft.setCursor(0, 0);
   tft.printf("Humidity:\n");
-  if (ccHumidity.length()) {
-    tft.setTextSize(3);
-    tft.setTextColor(TFT_WHITE);
-    //tft.setCursor(0, 50);
-    tft.printf("     %s\n", ccHumidity.c_str());
+      if (ccHumidity.length()) {
+        tft.setTextSize(3);
+        tft.setTextColor(TFT_WHITE);
+        tft.printf("     %s\n", ccHumidity.c_str());
   }
   tft.setTextSize(1);
-tft.printf("Visibility:\n");
-  if (ccVisibility.length()) {
+    tft.printf("Visibility:\n");
+    if (ccVisibility.length()) {
     tft.setTextSize(3);
     tft.printf("     %s\n", ccVisibility.c_str());
   }
     tft.setTextSize(1);
-tft.printf("Dewpoint:\n");
-  if (ccDewpoint.length()) {
-    tft.setTextSize(3);
-    tft.printf("     %s C\n", ccDewpoint.c_str());
+    tft.printf("Dewpoint:\n");
+        if (ccDewpoint.length()) {
+            tft.setTextSize(3);
+            tft.printf("     %s C\n", ccDewpoint.c_str());
   }
   if (ccAQHI.length()) {
     tft.setTextSize(1);
-tft.printf("Air Quality HI:\n");
+    tft.printf("Air Quality HI:\n");
     tft.setTextSize(3);
-    //tft.setTextColor(TFT_VIOLET);
     tft.printf("     {%s}\n", ccAQHI.c_str());
   }
 }
 
 void drawPageFour(){
-  tft.setTextSize(2);
-  tft.setTextColor(TFT_GREEN);
+  tft.setTextSize(3);
+  tft.setTextColor(TFT_WHITE);
   drawWordWrappedText(0, 0, tft.width(), fc6hrTitle);
-   tft.setTextColor(TFT_WHITE);
-  tft.setTextSize(2);
-  drawWordWrappedText(0, 40, tft.width(), fc6hrSummary);  // NO ROOM FOR BOTH, CHOSE ONE AND MAKE IT LARGER FONT AND REMOVE THE OTHER
-  
-  
 }
 void drawPageFive(){
-  tft.setTextSize(2);
-  tft.setTextColor(TFT_GREEN);
-  drawWordWrappedText(0, 0, tft.width(), fc12hrTitle);
-   tft.setTextColor(TFT_WHITE);
-  tft.setTextSize(2);
-  drawWordWrappedText(0, 40, tft.width(), fc12hrSummary);  // NO ROOM FOR BOTH, CHOSE ONE AND MAKE IT LARGER FONT AND REMOVE THE OTHER
-
-}
-void drawAlertPage() {
-  //tft.fillRect(0, 0, tft.width(), 80, TFT_DARKGREY);
   tft.setTextSize(3);
-  //tft.setTextColor(TFT_YELLOW);
-  //tft.setCursor(0, 0);
-  //tft.println("ALERT>>");
+  tft.setTextColor(TFT_WHITE);
+  drawWordWrappedText(0, 0, tft.width(), fc12hrTitle);
+}
+
+void drawAlertPage() {
+  tft.setTextSize(3);
   uint16_t c = alertColorFor(alertTitle);
   tft.setTextColor(c);
   drawWordWrappedText(0, 0, tft.width(), alertTitle);
-  //tft.setTextSize(3);
-  //tft.printf("%s\n", alertTitle.c_str());
-  //tft.setTextColor(c);
-  //tft.setTextSize(2);
-  //drawWordWrappedText(0, 100, tft.width(), alertSummary);
-  //tft.printf("%s\n", alertSummary.c_str());
 }
-  //////////////////////////////////////////////////
-
-  uint16_t alertColorFor(const String &title) {
-  String t = title;
-  t.toLowerCase();
+ 
+uint16_t alertColorFor(const String &title) {
+String t = title;
+t.toLowerCase();
 if (t.indexOf("red") >= 0) return TFT_RED;
-  if (t.indexOf("orange") >= 0) return TFT_ORANGE;
-  if (t.indexOf("yellow") >= 0) return TFT_YELLOW;
-  if (t.indexOf("special") >= 0) return TFT_BLUE;
+if (t.indexOf("orange") >= 0) return TFT_ORANGE;
+if (t.indexOf("yellow") >= 0) return TFT_YELLOW;
+if (t.indexOf("special") >= 0) return TFT_GREENYELLOW;
 
-  return TFT_WHITE; /// TFT_DARKGREY
+  return TFT_LIGHTGREY; /// TFT_DARKGREY
 }
 
 // ===== XML Helpers =====
 String extractXmlValue(const String &xml, const String &tag) {
   String open  = "<" + tag;
   int idx = xml.indexOf(open);
-  if (idx == -1) return "";
-  idx = xml.indexOf(">", idx);
-  if (idx == -1) return "";
-  idx++;
-  int end = xml.indexOf("</" + tag + ">", idx);
-  if (end == -1) return "";
-  return xml.substring(idx, end);
+      if (idx == -1) return "";
+          idx = xml.indexOf(">", idx);
+      if (idx == -1) return "";
+          idx++;
+          int end = xml.indexOf("</" + tag + ">", idx);
+      if (end == -1) return "";
+      return xml.substring(idx, end);
 }
 
 String extractLabeledValue(const String &src, const String &label) {
   int start = src.indexOf(label);
-  if (start == -1) return "";
-  start += label.length();
-  int end = src.indexOf('\n', start);
-  if (end == -1) end = src.length();
-  String val = src.substring(start, end);
-  val.trim();
-  return val;
+      if (start == -1) return "";
+          start += label.length();
+          int end = src.indexOf('\n', start);
+      if (end == -1) end = src.length();
+          String val = src.substring(start, end);
+          val.trim();
+          return val;
 }
