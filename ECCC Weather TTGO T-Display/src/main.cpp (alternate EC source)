@@ -46,12 +46,11 @@ const char* ALERTS_RSS_URL   = "https://weather.gc.ca/rss/battleboard/ab12_e.xml
 
 //====== Aurora Watch Data ===========
 const char* auroraURL = "https://www.aurorawatch.ca/AWVal.txt";  // NOTE: THIS WEBSITE ONLY UPDATES ONCE PER HOUR AT :11 MINUTES PAST THE HOUR.
-// IF YOU START YOUR WEATHER NODE AT :12 MINUTES PAST THE HOUR IT WILL UPDATE EVERY HOUR AT :12 MINUTES PAST THE HOUR.
 
 // ===== Update intervals (ms) =====
 const unsigned long WEATHER_INTERVAL = 900000UL; // update 15 minutes
 const unsigned long ALERTS_INTERVAL  = 1200000UL; //  update 20 minutes 1200000UL
-const unsigned long AURORA_INTERVAL = 3600000UL; // update 60 minutes  UPDATES ONCE PER HOUR
+const unsigned long AURORA_INTERVAL = 1800000UL; // update 30 minutes 1800000UL
 unsigned long lastWeatherUpdate = 0;
 unsigned long lastAlertsUpdate  = 0;
 unsigned long lastAuroraUpdate = 0;
@@ -698,7 +697,7 @@ void drawPageOne() {
   drawWordWrappedText(0, 0, tft.width(), ccObservedAt);
  
   if (ccCondition.length()) {
-    tft.setTextSize(3);
+    tft.setTextSize(2);
     tft.setTextColor(TFT_CYAN);
     drawWordWrappedText(0, 20, tft.width(), ccCondition);
   }
@@ -784,13 +783,13 @@ tft.printf("Air Quality HI:\n");
 }
 
 void drawPageFour(){
-  tft.setTextSize(3);
+  tft.setTextSize(2);
   tft.setTextColor(TFT_WHITE);
   drawWordWrappedText(0, 0, tft.width(), fc6hrTitle);
 }
 
 void drawPageFive(){
-  tft.setTextSize(3);
+  tft.setTextSize(2);
   tft.setTextColor(TFT_WHITE);
   drawWordWrappedText(0, 0, tft.width(), fc12hrTitle);
 }
