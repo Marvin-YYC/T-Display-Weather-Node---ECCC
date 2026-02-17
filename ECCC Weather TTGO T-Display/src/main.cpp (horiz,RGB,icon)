@@ -779,6 +779,10 @@ void parseAlerts(const String& xml) {
 
     String entry = xml.substring(start, end);
     String title = extractXmlValue(entry,"title");
+    int commaPos = title.indexOf(',');  // this removes the "city of 'name'" to make more space for NavCan line at the bottom of page1
+    if (commaPos != -1) {
+    title = title.substring(0, commaPos) + ", " + stationId; // replaces city name with stationId or use this if no staion ID  + tcId
+    }
     String summary = extractXmlValue(entry,"summary");
     String area = extractXmlValue(entry,"cap:areaDesc");
 
