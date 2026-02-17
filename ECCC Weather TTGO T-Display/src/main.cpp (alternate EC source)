@@ -3,7 +3,7 @@
 #include <HTTPClient.h>
 #include <TFT_eSPI.h>
 #include <time.h>
-#include "WeatherFont60.h"
+#include "WeatherFont60.h"   /// BE SURE TO ADD THE WEATHERFONT60 FILE
 
 //Backlight
 const uint8_t brightnessLevels[] = { 4, 20, 60, 120, 180, 255 };
@@ -16,14 +16,20 @@ const int pwmChannel = 0;
 #define BACKLIGHT_FREQ 5000
 #define BACKLIGHT_RES 8  
 #define BUTTON_PIN 0   // TTGO Left front button controls screen brightness
+///Bar Graph
+#define BAR_WIDTH   200
+#define BAR_HEIGHT  18
+#define BAR_X       20
+#define BAR_Y       70
+
 
 bool alertActive = false;
 bool alertJustAppeared = false;
 
 
 // ===== WiFi =====
-const char* SSID     = "YOUR_SSID";  /// EDIT YOUR SSID
-const char* PASSWORD = "YOUR_SSID_PASSWORD";  /// EDIT YOUR PASSWORD
+const char* SSID     = "YOUR_SSID";   //  YOUR_SSID >>>>>>>>>>> EDIT <<<<<<<<<<<<<<
+const char* PASSWORD = "YOUR_SSID_PASSWORD";  // YOUR_SSID_PASSWORD >>>>>>>>>>>>>> EDIT <<<<<<<<<<<
 
 // ===== URLs =====
 //===== Weather Data ======
@@ -38,11 +44,19 @@ const char* ALERTS_RSS_URL   = "https://weather.gc.ca/rss/battleboard/ab12_e.xml
 //const char* ALERTS_RSS_URL   = "https://weather.gc.ca/rss/battleboard/bcrm10_e.xml"; // test
 //const char* ALERTS_RSS_URL   = "https://weather.gc.ca/rss/battleboard/bcrm28_e.xml"; // test 
 
+//====== Aurora Watch Data ===========
+const char* auroraURL = "https://www.aurorawatch.ca/AWVal.txt";  // NOTE: THIS WEBSITE ONLY UPDATES ONCE PER HOUR AT :11 MINUTES PAST THE HOUR.
+// IF YOU START YOUR WEATHER NODE AT :12 MINUTES PAST THE HOUR IT WILL UPDATE EVERY HOUR AT :12 MINUTES PAST THE HOUR.
+
 // ===== Update intervals (ms) =====
-const unsigned long WEATHER_INTERVAL = 900000UL; // update 15 min
+const unsigned long WEATHER_INTERVAL = 900000UL; // update 15 minutes
 const unsigned long ALERTS_INTERVAL  = 1200000UL; //  update 20 minutes 1200000UL
+const unsigned long AURORA_INTERVAL = 3600000UL; // update 60 minutes  UPDATES ONCE PER HOUR
 unsigned long lastWeatherUpdate = 0;
 unsigned long lastAlertsUpdate  = 0;
+unsigned long lastAuroraUpdate = 0;
+int auroraValue = 0;
+bool auroraValid = false;
 
 // ===== TFT =====
 TFT_eSPI tft = TFT_eSPI();
@@ -71,7 +85,7 @@ String alertTitle   = "";
 String alertSummary = "";
 
 // ===== Display paging =====
-enum Page { PAGE_ONE, PAGE_TWO, PAGE_THREE, PAGE_FOUR, PAGE_FIVE, ALERT_PAGE };
+enum Page { PAGE_ONE, PAGE_TWO, PAGE_THREE, PAGE_FOUR, PAGE_FIVE, AURORA_PAGE, ALERT_PAGE };
 Page currentPage = PAGE_ONE;
 unsigned long pageTimer = 0;
 const unsigned long PAGE_DURATION = 8000UL; // 10 seconds = 10000UL 8seconds = 8000
@@ -82,6 +96,7 @@ void connectWiFi();
 void fetchWeather();
 void fetchForecast24h(const String &xml);
 void fetchAlerts();
+void getAuroraData();
 void drawAlertPage();
 
 String extractXmlValue(const String &xml, const String &tag);
@@ -94,6 +109,7 @@ void drawPageTwo();
 void drawPageThree();
 void drawPageFour();
 void drawPageFive();
+void drawAuroraPage();
 void drawAlertPage();
 
   void showBootScreen() {
@@ -113,6 +129,7 @@ void drawAlertPage();
       tft.setTextSize(1);
       tft.drawString("observation from:", tft.width() / 2, 60);
       tft.drawString("Environment Canada", tft.width() / 2, 70);
+      tft.drawString("UofA - AuroraWatch.ca", tft.width() / 2, 80);
       delay(1500);
       tft.drawString("Firmware running", tft.width() / 2, 100);
       tft.setTextColor(TFT_YELLOW, TFT_BLACK);
@@ -138,6 +155,7 @@ void setup() {
   connectWiFi();
   fetchWeather();
   fetchAlerts();
+  lastAuroraUpdate = millis() - AURORA_INTERVAL;
 
   pageTimer = millis();
   drawPageOne();
@@ -193,6 +211,11 @@ if (alertActive != lastAlertState) {
     lastAlertsUpdate = now;
   }
 
+  if (millis() - lastAuroraUpdate >= AURORA_INTERVAL) {
+  lastAuroraUpdate = millis();
+  getAuroraData();
+}
+
  // Page switching
   if (now - pageTimer > PAGE_DURATION) {
     pageTimer = now;
@@ -215,6 +238,10 @@ if (alertActive != lastAlertState) {
         break;
 
       case PAGE_FIVE:
+        currentPage = AURORA_PAGE;
+        break;
+
+      case AURORA_PAGE:
         currentPage = ALERT_PAGE;
         break;
 
@@ -242,6 +269,9 @@ if (alertActive != lastAlertState) {
   else if (currentPage == PAGE_FIVE) {
     drawPageFive();
   }
+  else if (currentPage == AURORA_PAGE) {
+  drawAuroraPage();
+}
   else {
     drawAlertPage();
   }
@@ -443,7 +473,97 @@ void fetchAlerts() {
   }
   http.end();
 }
- 
+
+void getAuroraData() {
+
+  Serial.println("Fetching Aurora Data...");
+
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi not connected.");
+    return;
+  }
+
+  WiFiClientSecure client;
+  client.setInsecure();   // Required for HTTPS
+
+  HTTPClient http;
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  http.begin(client, auroraURL);
+
+  int httpCode = http.GET();
+  Serial.print("HTTP Code: ");
+  Serial.println(httpCode);
+
+  if (httpCode == 200) {
+    String payload = http.getString();
+    payload.trim();   // remove newline
+
+    Serial.print("Raw Payload: [");
+    Serial.print(payload);
+    Serial.println("]");
+
+    auroraValue = payload.toInt();
+    auroraValid = true;
+
+    Serial.print("Parsed Aurora Value: ");
+    Serial.println(auroraValue);
+  }
+  else {
+    Serial.println("Failed to fetch aurora data.");
+    auroraValid = false;
+  }
+
+  http.end();
+}
+
+void drawAuroraBar(int value) {
+
+  uint16_t barColor;
+
+  if (value >= 80)
+    barColor = TFT_RED;
+  else if (value > 65)
+    barColor = TFT_YELLOW;
+  else if (value > 50)
+    barColor = TFT_GREENYELLOW;
+  else
+    barColor = TFT_WHITE;
+
+  // Clear only bar region
+  //tft.fillRect(BAR_X, BAR_Y, BAR_WIDTH, BAR_HEIGHT + 12, TFT_BLACK);
+
+  // Outline
+  tft.drawRect(BAR_X, BAR_Y, BAR_WIDTH, BAR_HEIGHT, TFT_DARKGREY);
+
+  int fillWidth = map(value, 0, 100, 0, BAR_WIDTH);
+
+  if (fillWidth > 0)
+    tft.fillRect(BAR_X + 1, BAR_Y + 1,
+                 fillWidth - 2, BAR_HEIGHT - 2,
+                 barColor);
+
+  // Tick marks
+  for (int i = 0; i <= 4; i++) {
+    int tickX = BAR_X + (i * BAR_WIDTH / 4);
+    tft.drawLine(tickX, BAR_Y + BAR_HEIGHT,
+                 tickX, BAR_Y + BAR_HEIGHT + 5,
+                 TFT_LIGHTGREY);
+  }
+
+  tft.setTextSize(1);
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+
+  tft.setCursor(BAR_X - 2, BAR_Y + BAR_HEIGHT + 6);
+  tft.print("0");
+
+  tft.setCursor(BAR_X + BAR_WIDTH/2 - 6, BAR_Y + BAR_HEIGHT + 6);
+  tft.print("50");
+
+  tft.setCursor(BAR_X + BAR_WIDTH - 18, BAR_Y + BAR_HEIGHT + 6);
+  tft.print("100");
+}
+
+
 char weatherIconFromCondition(const String &cond) {
   String c = cond;
   c.toLowerCase();
@@ -514,7 +634,6 @@ String formatObservedTime(String raw) {
   return raw;
 }
 
-
 void drawWordWrappedText(int x, int y, int maxWidth, const String &text) {
 
   int cursorX = x;
@@ -582,8 +701,6 @@ void drawPageOne() {
     tft.setTextSize(3);
     tft.setTextColor(TFT_CYAN);
     drawWordWrappedText(0, 20, tft.width(), ccCondition);
-    //tft.println("\n");
-    //tft.printf("%s\n", ccCondition.c_str());
   }
   if (ccTemperature.length()) {
     tft.setTextSize(6);
@@ -602,7 +719,6 @@ void drawPageOne() {
   // ---- WEATHER ICON (DRAW LAST) ----
  char icon = weatherIconFromCondition(ccCondition);
   tft.loadFont(weatherfont60);
-  //tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setCursor(186, 66);
   tft.print(icon);
   tft.unloadFont();
@@ -621,6 +737,7 @@ void drawPageOne() {
     tft.printf("BarPress:\n");
     tft.setTextSize(3);
     tft.setTextColor(TFT_WHITE);
+    //tft.setCursor(0, 0);
     tft.printf("    %s\n", ccPressure.c_str());
   }
 
@@ -631,6 +748,7 @@ void drawPageOne() {
     tft.printf("Wind:\n");
     tft.setTextSize(3);
     drawWordWrappedText(0, 86, tft.width(), ccWind);
+    //tft.printf("%s\n", ccWind.c_str());
   }
 }
 
@@ -639,28 +757,29 @@ void drawPageOne() {
   tft.setTextColor(TFT_WHITE);
   tft.setCursor(0, 0);
   tft.printf("Humidity:\n");
-      if (ccHumidity.length()) {
-        tft.setTextSize(3);
-        tft.setTextColor(TFT_WHITE);
-        tft.printf("     %s\n", ccHumidity.c_str());
+  if (ccHumidity.length()) {
+    tft.setTextSize(3);
+    tft.setTextColor(TFT_WHITE);
+    //tft.setCursor(0, 50);
+    tft.printf("     %s\n", ccHumidity.c_str());
   }
   tft.setTextSize(1);
-    tft.printf("Visibility:\n");
-    if (ccVisibility.length()) {
+tft.printf("Visibility:\n");
+  if (ccVisibility.length()) {
     tft.setTextSize(3);
     tft.printf("     %s\n", ccVisibility.c_str());
   }
     tft.setTextSize(1);
-    tft.printf("Dewpoint:\n");
-        if (ccDewpoint.length()) {
-            tft.setTextSize(3);
-            tft.printf("     %s C\n", ccDewpoint.c_str());
+tft.printf("Dewpoint:\n");
+  if (ccDewpoint.length()) {
+    tft.setTextSize(3);
+    tft.printf("     %s C\n", ccDewpoint.c_str());
   }
   if (ccAQHI.length()) {
     tft.setTextSize(1);
-    tft.printf("Air Quality HI:\n");
+tft.printf("Air Quality HI:\n");
     tft.setTextSize(3);
-    tft.printf("     {%s}\n", ccAQHI.c_str());
+    tft.printf("     { %s }\n", ccAQHI.c_str());
   }
 }
 
@@ -669,10 +788,41 @@ void drawPageFour(){
   tft.setTextColor(TFT_WHITE);
   drawWordWrappedText(0, 0, tft.width(), fc6hrTitle);
 }
+
 void drawPageFive(){
   tft.setTextSize(3);
   tft.setTextColor(TFT_WHITE);
   drawWordWrappedText(0, 0, tft.width(), fc12hrTitle);
+}
+
+void drawAuroraPage() {
+
+  tft.setTextSize(2);
+  tft.setCursor(0, 0);
+
+  if (!auroraValid) {
+    tft.setTextColor(TFT_WHITE);
+    tft.print("No Aurora Data");
+    return;
+  }
+
+  uint16_t textColor;
+
+  if (auroraValue >= 80)
+    textColor = TFT_RED;
+  else if (auroraValue > 65)
+    textColor = TFT_YELLOW;
+  else if (auroraValue > 50)
+    textColor = TFT_GREENYELLOW;
+  else
+    textColor = TFT_WHITE;
+
+  tft.setTextColor(textColor, TFT_BLACK);
+  tft.printf("Aurora borealis:\n\n ");
+  tft.setTextSize(3);
+  tft.printf("    %d%%", auroraValue);
+  // Draw bar
+  drawAuroraBar(auroraValue);
 }
 
 void drawAlertPage() {
@@ -681,14 +831,13 @@ void drawAlertPage() {
   tft.setTextColor(c);
   drawWordWrappedText(0, 0, tft.width(), alertTitle);
 }
- 
-uint16_t alertColorFor(const String &title) {
-String t = title;
-t.toLowerCase();
-if (t.indexOf("red") >= 0) return TFT_RED;
-if (t.indexOf("orange") >= 0) return TFT_ORANGE;
-if (t.indexOf("yellow") >= 0) return TFT_YELLOW;
-if (t.indexOf("special") >= 0) return TFT_GREENYELLOW;
+  uint16_t alertColorFor(const String &title) {
+  String t = title;
+  t.toLowerCase();
+  if (t.indexOf("red") >= 0) return TFT_RED;
+  if (t.indexOf("orange") >= 0) return TFT_ORANGE;
+  if (t.indexOf("yellow") >= 0) return TFT_YELLOW;
+  if (t.indexOf("special") >= 0) return TFT_GREENYELLOW;
 
   return TFT_LIGHTGREY; /// TFT_DARKGREY
 }
@@ -697,22 +846,22 @@ if (t.indexOf("special") >= 0) return TFT_GREENYELLOW;
 String extractXmlValue(const String &xml, const String &tag) {
   String open  = "<" + tag;
   int idx = xml.indexOf(open);
-      if (idx == -1) return "";
-          idx = xml.indexOf(">", idx);
-      if (idx == -1) return "";
-          idx++;
-          int end = xml.indexOf("</" + tag + ">", idx);
-      if (end == -1) return "";
-      return xml.substring(idx, end);
+  if (idx == -1) return "";
+  idx = xml.indexOf(">", idx);
+  if (idx == -1) return "";
+  idx++;
+  int end = xml.indexOf("</" + tag + ">", idx);
+  if (end == -1) return "";
+  return xml.substring(idx, end);
 }
 
 String extractLabeledValue(const String &src, const String &label) {
   int start = src.indexOf(label);
-      if (start == -1) return "";
-          start += label.length();
-          int end = src.indexOf('\n', start);
-      if (end == -1) end = src.length();
-          String val = src.substring(start, end);
-          val.trim();
-          return val;
+  if (start == -1) return "";
+  start += label.length();
+  int end = src.indexOf('\n', start);
+  if (end == -1) end = src.length();
+  String val = src.substring(start, end);
+  val.trim();
+  return val;
 }
