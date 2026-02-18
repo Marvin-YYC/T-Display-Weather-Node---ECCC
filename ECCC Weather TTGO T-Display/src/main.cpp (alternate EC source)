@@ -46,7 +46,7 @@ const char* auroraURL = "https://www.aurorawatch.ca/AWVal.txt";   // NOTE: THIS 
 // ===== Update intervals (ms) =====
 const unsigned long WEATHER_INTERVAL = 600000UL; // update 15 minutes 900000UL // update 10 minutes 600000UL
 const unsigned long ALERTS_INTERVAL  = 1200000UL; //  update 20 minutes 1200000UL  // 5 min for test 300000UL
-const unsigned long AURORA_INTERVAL = 3600000UL; // update 60 minutes 3600000UL
+const unsigned long AURORA_INTERVAL = 3600000UL; // update 60 minutes 3600000UL // update 30 minutes 1800000UL
 unsigned long lastWeatherUpdate = 0;
 unsigned long lastAlertsUpdate  = 0;
 unsigned long lastAuroraUpdate = 0;
