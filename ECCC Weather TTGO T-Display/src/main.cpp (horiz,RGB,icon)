@@ -1,5 +1,5 @@
-//28/JAN/25 11:11
-//  Horizontal with four pages Tested Colour Alerts Station ID line wrap , brightness button,  splash screen, and RGB LED Alerts weather icon , rmk.alerts
+
+//  Horizontal with seven pages Tested Colour Alerts Station ID line wrap , brightness button,  splash screen, and RGB LED Alerts weather icon , rmk.alerts
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <TFT_eSPI.h>
@@ -70,8 +70,8 @@ bool froinLedOn = false;
 /////
 
 // WiFi
-const char* ssid = "YOUR_SSID_HERE";    // >>>>EDIT YOUR_SSID_HERE
-const char* password = "YOUR_SSID_PASSWORD_HERE"; // >>>>EDIT YOUR_SSID_PASSWORD_HERE
+const char* ssid = "YOUR_SSID_HERE";    // >>>> EDIT YOUR_SSID_HERE
+const char* password = "YOUR_SSID_PASSWORD_HERE"; // >>>> EDIT YOUR_SSID_PASSWORD_HERE
 
 // ECCC Current Weather SWOB  nav_canada/observation/atmospheric/surface_weather 
 const char* CurrWXURL ="https://dd.weather.gc.ca/today/observations/swob-ml/latest/CYYC-MAN-swob.xml"; // CYYC ~ Calgary International, AB - MAN
@@ -85,10 +85,6 @@ const char* CurrWXURL ="https://dd.weather.gc.ca/today/observations/swob-ml/late
 
 // ECCC Weather Alerts ATOM RSS feed
 const char* ALERTS_URL = "https://weather.gc.ca/rss/battleboard/ab12_e.xml"; // CYYC  Calgary, AB
-
-//const char* ALERTS_URL = "https://weather.gc.ca/rss/battleboard/nu3_e.xml"; 
-//const char* ALERTS_URL = "https://weather.gc.ca/rss/battleboard/abrm7027_h_e.xml"; 
-
 
 // Timing
 const unsigned long UPDATE_INTERVAL = 900000UL;  // 15 min = 900000UL//
@@ -114,7 +110,7 @@ String tempC="--", maxTemp24="--", minTemp24="--", dewpoint="--", humidity="--";
 String pressure="--", pressureSLP="--", windSpeed="--", windGust="--";
 String windDir="--", windCardinal="--";
 String visibility="--", cloudBase1="--", vertVis="--", cloudBase2="--",cloudBase3="--", cloudCover="--";
-String wxCode="--", wxText="--", wxText2="--";
+String wxCode="--", wxText="--", wxText2="--", wxText3="--";
 String obsUTC="--", obsLocal="--";
 String conditionText="?", Remark="--";
 String stationName="-------", stationId="----", tcId="---",wmoId="------",mscId="-----",rptType="--";
@@ -140,9 +136,9 @@ String windDegToCardinal(float);
 String decodeWeather(const String&);
 String utcToLocal(const String&);
 float windChill(float,float);
-void drawScrollingText(int x, int y, String text, int maxWidth);
-String extractLabeledValue(const String &src, const String &label);
-void drawWeatherIcon();
+//void drawScrollingText(int x, int y, String text, int maxWidth);
+//String extractLabeledValue(const String &src, const String &label);
+//void drawWeatherIcon();
 void drawPageOne();
 void drawPageTwo();
 void drawPageThree();
@@ -186,8 +182,6 @@ void setup() {
   screenWidth = tft.width();
   pinMode(BTN_BRIGHTNESS, INPUT_PULLUP);
   pinMode(BTN_RIGHT, INPUT);
-  //lastInteractionTime = millis();
-
   ledcSetup(BACKLIGHT_CHANNEL, BACKLIGHT_FREQ, BACKLIGHT_RES);
   ledcAttachPin(BACKLIGHT_PIN, BACKLIGHT_CHANNEL);
   ledcWrite(BACKLIGHT_CHANNEL, 20);  // Start at low brightness
@@ -199,11 +193,9 @@ void setup() {
   digitalWrite(LED_R, LOW);
   digitalWrite(LED_G, LOW);
   digitalWrite(LED_B, LOW);
-
   connectWiFi();
   fetchECData();
   fetchAlerts();
-  //pageTimer = millis();  // <<  //<<   take this out if you don't want auto page 
   drawPageOne();
   
 }
@@ -481,7 +473,6 @@ uint16_t getAlertColor(const String &title) {
 
 void loop() {
   unsigned long now = millis();
-
   handleBrightnessButton();
   handlePageButton();
   handleAuroraLED();
@@ -620,6 +611,7 @@ void fetchECData() {
     Remark      = extractSWOBValue(xml,"rmk");
     wxCode      = extractSWOBValue(xml,"prsnt_wx_1");
     wxText2     = extractSWOBValue(xml,"prsnt_wx_2");
+    wxText3     = extractSWOBValue(xml,"prsnt_wx_3");
     obsUTC      = extractSWOBValue(xml,"date_tm");
     vertVis     = extractSWOBValue(xml,"vert_vis");
     stationName = extractSWOBValue(xml,"stn_nam");
@@ -777,12 +769,15 @@ void parseAlerts(const String& xml) {
     int end   = xml.indexOf("</entry>", start);
     if (end == -1) break;
 
-    String entry = xml.substring(start, end);
+    String entry = xml.substring(start, end);  
     String title = extractXmlValue(entry,"title");
+
     int commaPos = title.indexOf(',');  // this removes the "city of 'name'" to make more space for NavCan line at the bottom of page1
     if (commaPos != -1) {
     title = title.substring(0, commaPos) + ", " + stationId; // replaces city name with stationId or use this if no staion ID  + tcId
     }
+
+
     String summary = extractXmlValue(entry,"summary");
     String area = extractXmlValue(entry,"cap:areaDesc");
 
@@ -952,7 +947,7 @@ String decodeWeather(const String& c) {
   if (c=="88")  return "Snow Grains";
 
   // ---- Blowing / Drifting Snow ----
-  if (c=="120") return "Blowing Snow";
+  if (c=="128") return "Blowing Snow";
   if (c=="121") return "Drifting Snow";
   if (c=="122") return "HvyBlowngSnow";
   if (c=="132") return "Drifting Snow"; 
@@ -1021,7 +1016,7 @@ char weatherIconFromCode(int code, int cloudBase1, int cloudCover) {
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   return 'O'; // overcast - mostly cloudy > double clouds
   }
-  else if (cloudCover >= 40) {
+  else if (cloudCover >= 25) {
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
     return 'P'; // partly cloudy >single cloud
   }
@@ -1029,25 +1024,6 @@ char weatherIconFromCode(int code, int cloudBase1, int cloudCover) {
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
     return 'C'; // few clouds > sun with cloud
   }
-
-/*
-  // ---- CLEAR SKY ----
-  if (cloudBase1 == 0) {
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    return 'N';   // SUN
-  }
-   if (cloudCover == 100) {
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    return 'O'; // OVERCAST DOUBLE CLOUD
-  }
-    if (cloudCover > 75) {
-      tft.setTextColor(TFT_WHITE, TFT_BLACK);
-      return 'P'; // SINGLE CLOUD
-    }
-    // ---- ELSE ----
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    return 'C'; // FEW CLOUDS
-    */      /////////////////////////
 }
 
 //PAGE ONE
@@ -1062,7 +1038,7 @@ void drawPageOne() {
   //tft.printf("%s - %s @ %s\n\n", stationName.c_str(), stationId.c_str(), obsLocal.c_str());
 
   // Temperature
-  tft.setCursor(14,14);
+  tft.setCursor(14,18); //14,14 
   tft.setTextSize(6);
   tft.setTextColor(TFT_WHITE);
   tft.printf("%s\n", tempC.c_str());
@@ -1155,7 +1131,7 @@ void drawPageOne() {
   // ---- WEATHER ICON (DRAW LAST) ----
   tft.loadFont(weatherfont60);
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  tft.setCursor(192, 16);
+  tft.setCursor(198, 18); // 194,14
   tft.print(weatherIconFromCode(wxCode.toInt(), cloudBase1.toInt(), cloudCover.toInt()));
   tft.unloadFont();
 }
@@ -1187,14 +1163,8 @@ void drawPageThree(){
   tft.setTextColor(TFT_CYAN);
   tft.printf("wx1:%s\n", decodeWeather(conditionText).c_str());
   tft.printf("wx2:%s\n", decodeWeather(wxText2).c_str());
-  // Wind chill (only if <= 0°C)
-  tft.setCursor(0,50);
-  tft.setTextSize(2);
-  float t = tempC.toFloat();
-  if (t <= -0.1) {  
-    tft.setTextColor(TFT_SKYBLUE);
-    tft.printf("Windchill:%.0f C", windChill(t, windSpeed.toFloat()));
-  }
+  tft.printf("wx3:%s\n", decodeWeather(wxText3).c_str());
+
   tft.setTextSize(3); 
   tft.setCursor(0,66);
   tft.setTextColor(TFT_WHITE);
@@ -1220,7 +1190,6 @@ void drawPageFour(){
   tft.printf("VVis:%s m",vertVis.c_str()); // vertical visibility when available
   //tft.printf("VertVis: %s m\n",vertVis=="MSNG"?"--":vertVis.c_str()); // vertical visibility when available
   //tft.printf("BarPres: %s hPa %s hPa \n",pressure.c_str(),pressureSLP.c_str()); 
-
 }
 
 void drawPageFive(){
@@ -1244,7 +1213,7 @@ void drawPageSix(){
   tft.setTextColor(TFT_GREEN);
   tft.printf("%s - %s @ %s\n\n",stationName.c_str(),stationId.c_str(),obsLocal.c_str());  // Weather Station Name
   tft.setTextSize(2);
-  tft.setTextColor(TFT_VIOLET);
+  tft.setTextColor(TFT_WHITE);
   tft.printf("NavCan Remark:\n");
   tft.setTextSize(3);
   drawWordWrappedText(0, 34, tft.width(),Remark.c_str());
@@ -1287,7 +1256,3 @@ void drawPageSeven(){
   tft.printf("  %s",obsLocal.c_str());
 
 }
-
-
-
-
