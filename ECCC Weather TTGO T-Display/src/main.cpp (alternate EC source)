@@ -594,6 +594,12 @@ char weatherIconFromCondition(const String &cond) {
   if (c.indexOf("snow") >= 0) return 'L'; // snow cloud
 
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  if (c.indexOf("ice crystals") >= 0) return 'L'; // snow cloud
+
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  if (c.indexOf("ice pellets") >= 0) return 'L'; // snow cloud
+
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
   if (c.indexOf("heavy rain") >= 0) return 'B'; // rain
 
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
