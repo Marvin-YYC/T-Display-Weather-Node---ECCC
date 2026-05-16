@@ -1,4 +1,4 @@
-// April 23/26
+// Updated May 16/26
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <TFT_eSPI.h>
@@ -26,7 +26,7 @@ const int pwmChannel = 0;
 bool alertActive = false;
 bool alertJustAppeared = false;
 
-//Alert active dot
+//Alert active indicator dot
 #define ALERT_DOT_X (tft.width() - 8) // (tft.width() - 10)
 #define ALERT_DOT_Y 6 // 10
 #define ALERT_DOT_R 6  // 8 / 4  radius of circle 
@@ -47,7 +47,7 @@ int barStartX;
 const char* ntpServer = "pool.ntp.org";
 
 void setupTime() {
-  configTzTime("MST7MDT,M3.2.0/2,M11.1.0/2", "pool.ntp.org"); // <<<<<<<<<<<< insert your POSIX timezone here this one is for Alberta / Mountain Time w/ DST
+  configTzTime("MST7MDT,M3.2.0/2,M11.1.0/2", "pool.ntp.org"); // <<<<<<<<<<<< insert your POSIX timezone here
 }
 /////
 
@@ -65,7 +65,7 @@ const char* WEATHER_RSS_URL  = "https://weather.gc.ca/rss/weather/51.046_-114.05
 const char* ALERTS_RSS_URL   = "https://weather.gc.ca/rss/battleboard/ab12_e.xml";   // Calgary  
 //<<your must use the url that indicates "battleboard" - -  alerts may not work correctly otherwise>>
 
-//const char* ALERTS_RSS_URL   = "https://weather.gc.ca/rss/battleboard/abrm326_e.xml"; // test
+//const char* ALERTS_RSS_URL   = "https://weather.gc.ca/rss/battleboard/mbrm177_e.xml"; // test
 //const char* ALERTS_RSS_URL   = "https://weather.gc.ca/rss/battleboard/bcrm28_e.xml"; // test 
 
 //====== Aurora Watch Data ===========
@@ -171,7 +171,7 @@ void setup() {
   showBootScreen();
   tft.fillScreen(TFT_BLACK);
   setupTime();
-
+Serial.printf("setup time void setup");
   int totalWidth = totalSegments * (segWidth + segGap);
   barStartX = (240 - totalWidth) / 2;
 
@@ -219,6 +219,29 @@ void loop() {
   unsigned long now = millis();
   handleBrightnessButton();
   static bool lastAlertState = false;
+
+/*
+// Enter deep sleep - SHORT SLEEP TEST
+struct tm timeinfo;
+if (getLocalTime(&timeinfo)) {
+if (timeinfo.tm_hour == 14 && timeinfo.tm_min == 12) { //  this test was for 14:12 (2:12pm)
+  Serial.println("Entering Deep Sleep for 3 minutes...");
+  esp_sleep_enable_timer_wakeup(3 * 60 * 1000000); // 3 minutes
+  esp_deep_sleep_start();
+    }
+}
+*/ 
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Enter deep sleep
+struct tm timeinfo;
+if (getLocalTime(&timeinfo)) {
+if (timeinfo.tm_hour >= 23) {    //   Begin deep sleeps at 23:00hrs wakes up when timer expires
+  Serial.println("Entering Deep Sleep...");
+  esp_sleep_enable_timer_wakeup((uint64_t)8 * 60 * 60 * 1000000); // 8 hours - wakes up after timer ends.  
+  //Timer is not accurate when in deep sleep. It may wake up a several minutes early/late.
+  esp_deep_sleep_start();
+  }
+}
 
 if (alertActive != lastAlertState) {
   pageTimer = now;
@@ -318,7 +341,12 @@ else if (currentPage == ALERT_PAGE) {
 }
   else {
     drawClockPage();
-  }
+    Serial.printf("drawclockpage");
+    drawAlertIndicator();
+}
+ // if (currentPage != CLOCK_PAGE) {
+ // drawAlertIndicator();
+//}
  ///////////////////////////////////////////////////////////
 
   delay(50); // light yield
@@ -402,7 +430,12 @@ void fetchWeather() {
       //ccObservedAt  = extractLabeledValue(summary, "Observed at:");
       ccCondition   = extractLabeledValue(summary, "Condition:");
       ccTemperature = extractLabeledValue(summary, "Temperature:");
-      ccPressure    = extractLabeledValue(summary, "Pressure / Tendency:");
+        ccPressure = extractLabeledValue(summary, "Pressure / Tendency:");
+        ccPressure.trim();
+            if (ccPressure.isEmpty()) {
+              ccPressure = extractLabeledValue(summary, "Pressure:");
+              ccPressure.trim();
+      }
       ccVisibility  = extractLabeledValue(summary, "Visibility:");
       ccHumidity    = extractLabeledValue(summary, "Humidity:");
       ccDewpoint    = extractLabeledValue(summary, "Dewpoint:");
@@ -689,7 +722,7 @@ char weatherIconFromCondition(const String &cond) {
   if (c.indexOf("light snow") >= 0 || c.indexOf("snow pellets") >= 0 || c.indexOf("snow grains") >= 0 ) return 'L'; // snow cloud
 
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  if (c.indexOf("snow") >= 0) return 'D'; // snow flake
+  if (c.indexOf("snow") >= 0) return 'L'; // snow cloud
 
    tft.setTextColor(TFT_WHITE, TFT_BLACK);
   if (c.indexOf("ice crystals") >= 0 || c.indexOf("light freezing drizzle") >= 0 || c.indexOf("freezing drizzle") >= 0 ) return 'L'; // snow cloud
@@ -731,6 +764,8 @@ String formatObservedTime(String raw) {
   }
 
   raw.replace("Calgary Int'l Airport", "Calgary");
+  raw.replace(" AM", "AM");  // <-- remove space before AM
+  raw.replace(" PM", "PM");  // <-- remove space before PM
   raw.trim();
 
   return raw;
@@ -801,7 +836,7 @@ void updateSecondsBar(int sec) {
       int x = barStartX + i * (segWidth + segGap);
 
     if (i <= sec) {
-      uint16_t color = (i % 10 == 0) ? TFT_BLUE : TFT_GREEN;
+      uint16_t color = (i % 10 == 0) ? TFT_ORANGE : TFT_GREEN;
       tft.fillRect(x, barY, segWidth, segHeight, color);
     } else {
         tft.fillRect(x, barY, segWidth, segHeight, TFT_DARKCYAN);
@@ -826,7 +861,7 @@ void updateSecondsBar(int sec) {
   } else {
     // Only draw the new segment
     x = barStartX + sec * (segWidth + segGap);
-    uint16_t color = (sec % 10 == 0) ? TFT_BLUE : TFT_GREEN;
+    uint16_t color = (sec % 10 == 0) ? TFT_ORANGE : TFT_GREEN;
     tft.fillRect(x, barY, segWidth, segHeight, color);
   }
 
@@ -890,7 +925,7 @@ tft.printf("Dewpoint:\n");
     tft.setTextColor(TFT_SKYBLUE);
     tft.printf("Windchill:\n");
     tft.setTextSize(3);
-    tft.printf("  %sC", ccWindChill.c_str());
+    tft.printf("   %s.o", ccWindChill.c_str());
     }else {
     tft.setTextSize(1);
     tft.setTextColor(TFT_DARKGREY);
@@ -931,12 +966,12 @@ tft.printf("Dewpoint:\n");
   if (ccPressure.length()) {
     tft.setTextSize(2);
     tft.setTextColor(TFT_WHITE);
-    tft.setCursor(0, 69); // 0,0
-    tft.printf("BarPress:\n");
+    tft.setCursor(0, 70);
+    tft.printf("Barometric Pressure:\n");
     tft.setTextSize(3);
     tft.setTextColor(TFT_WHITE);
-    //tft.setCursor(0, 0);
-    tft.printf("   %s\n", ccPressure.c_str());
+    drawWordWrappedText(10, 86, tft.width(), ccPressure);
+    //tft.printf("    %s\n", ccPressure.c_str());
   }
   //Current Time shown bottom right corner
    struct tm timeinfo;
@@ -956,7 +991,26 @@ tft.printf("Dewpoint:\n");
   tft.drawString(hourMin, 196, 124); // time  206, 128
 
 }
-
+  /*
+  //Current Time shown mid right next to trend
+   struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    tft.drawString("Time Error", 10, 10, 2);
+    return;
+  }
+  char hourMin[6];
+  char seconds[4];
+  char ampm[3];
+  //strftime(hourMin, sizeof(hourMin), "%H:%M", &timeinfo); // 24hr clock - hours:minutes
+  //strftime(hourMin, sizeof(hourMin), "%I:%M", &timeinfo); // 12hr clock with leading zero - hours:minutes 
+  strftime(hourMin, sizeof(hourMin), "%l:%M", &timeinfo); // 12hr clock no leading zero - hours:minutes 
+  tft.setTextSize(3);
+  tft.setTextColor(TFT_BLACK);
+  tft.fillRoundRect(150, 42, 96, 24, 10, TFT_GREEN);
+  tft.drawString(hourMin, 196, 56);
+}
+*/
+////////////////////////////////////////////////////////////////////////////////////////////////////////
 void drawPageFour(){
   tft.setTextSize(3);
   tft.setTextColor(TFT_WHITE);
@@ -976,8 +1030,8 @@ void drawAqhiPage(){
 if (ccAQHI.length()) {
 tft.printf("Air Quality\n");
 tft.printf("Health Index: \n\n");
-    tft.setTextSize(6);
-    tft.printf("   %s", ccAQHI.c_str());
+    tft.setTextSize(4); // 6
+    tft.printf("  < %s >", ccAQHI.c_str());
   }
   //Current Time shown bottom right corner
    struct tm timeinfo;
@@ -1045,11 +1099,27 @@ void drawAuroraPage() {
 }
 
 void drawAlertPage() {
-  tft.setTextSize(4); // (3)
+  tft.setTextSize(3); // (3)
   uint16_t c = alertColorFor(alertTitle);
   tft.setTextColor(c);
   drawWordWrappedText(0, 0, tft.width(), alertTitle);
 
+  //Current Time shown bottom right corner
+   struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    tft.drawString("Time Error", 10, 10, 2);
+    return;
+  }
+  char hourMin[6];
+  char seconds[4];
+  char ampm[3];
+  //strftime(hourMin, sizeof(hourMin), "%H:%M", &timeinfo); // 24hr clock - hours:minutes
+  //strftime(hourMin, sizeof(hourMin), "%I:%M", &timeinfo); // 12hr clock with leading zero - hours:minutes 
+  strftime(hourMin, sizeof(hourMin), "%l:%M", &timeinfo); // 12hr clock no leading zero - hours:minutes 
+  tft.setTextSize(3);
+  tft.setTextColor(TFT_GREENYELLOW);
+  tft.fillRoundRect(146, 110, 100, 25, 10, TFT_DARKCYAN);
+  tft.drawString(hourMin, 196, 124); // time  206, 128
 }
 
 void enterClockPage() {
@@ -1085,27 +1155,27 @@ void drawClockPage() {
  
   // ===== TIME (unchanged) =====
   tft.setTextDatum(MC_DATUM);
-  tft.fillRoundRect(0, 0, 270, 67, 30, TFT_DARKCYAN); // tft.fillRoundRect(0, 0, 270, 67, 30, TFT_DARKCYAN);
+  tft.fillRoundRect(0, 0, 270, 67, 30, TFT_TRANSPARENT); // tft.fillRoundRect(0, 0, 270, 67, 30, TFT_DARKCYAN);
   tft.setTextSize(7);
   tft.setTextColor(TFT_GREEN);
   tft.drawString(hourMin, 120, 36); // time
   tft.setTextSize(2);
-  tft.setTextColor(TFT_BLACK);
+  tft.setTextColor(TFT_DARKGREY);
   tft.drawString(tzStr, 120, 60); // timezone shown below colon
   tft.setTextSize(2);
   tft.setTextColor(TFT_WHITE);
   tft.drawString(ampm, 120, 8); // am/pm shown above colon
 
   // ===== DATE =====
+  tft.fillRect(0, 95, 270, 44, TFT_DARKGREEN);
   tft.setTextSize(4);
   tft.setTextColor(TFT_WHITE);
-  tft.drawString(dateStr, 120, 122); // 120,110
+  tft.drawString(dateStr, 120, 116); // 120,110
 
   // ===== ADD THIS LINE (seconds bar) =====
   updateSecondsBar(timeinfo.tm_sec);
 }
 
-  //////////////////////////////////////////////////
   uint16_t alertColorFor(const String &title) {
   String t = title;
   t.toLowerCase();
@@ -1114,7 +1184,7 @@ void drawClockPage() {
   if (t.indexOf("yellow") >= 0) return TFT_YELLOW;
   if (t.indexOf("special") >= 0) return TFT_MAGENTA;   //  TFT_DARKCYAN;   // 
 
-  return TFT_DARKCYAN; /// TFT_DARKGREY
+  return TFT_LIGHTGREY; /// TFT_DARKGREY
 }
 
 // ===== XML Helpers =====
@@ -1140,5 +1210,3 @@ String extractLabeledValue(const String &src, const String &label) {
   val.trim();
   return val;
 }
-//////////////////////////////////////////////////////////////////////
-
