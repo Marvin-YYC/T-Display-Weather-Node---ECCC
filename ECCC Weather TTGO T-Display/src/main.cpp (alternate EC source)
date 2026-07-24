@@ -85,10 +85,6 @@ const char* WEATHER_RSS_URL  = "https://weather.gc.ca/rss/weather/51.046_-114.05
 
 //===== Alert Data =========
 const char* ALERTS_RSS_URL   = "https://weather.gc.ca/rss/weather/51.046_-114.057_e.xml";   // Calgary  
-//<<your must use the url that indicates "battleboard" - -  alerts may not work correctly otherwise>>
-
-//const char* ALERTS_RSS_URL   = "https://weather.gc.ca/rss/battleboard/mbrm177_e.xml"; // test
-//const char* ALERTS_RSS_URL   = "https://weather.gc.ca/rss/battleboard/bcrm28_e.xml"; // test 
 
 //====== Aurora Watch Data ===========
 const char* auroraURL = "https://www.aurorawatch.ca/AWVal.txt";   // NOTE: THIS WEBSITE ONLY UPDATES ONCE PER HOUR AT :11 MINUTES PAST THE HOUR.
@@ -1147,7 +1143,7 @@ tft.drawCentreString(aqhiText, 190, 12, 1); // 186,12,1
 }
     // Risk category
     tft.setTextSize(2);
-    tft.setCursor(20, 105); // 20,105
+    tft.setCursor(36, 105); // 20,105
     if (aqhiValue <= 3) {
         tft.setTextColor(TFT_CYAN);
         tft.print("LOW RISK");
@@ -1158,12 +1154,12 @@ tft.drawCentreString(aqhiText, 190, 12, 1); // 186,12,1
     }
     else if (aqhiValue <= 9) {
         tft.setTextColor(TFT_YELLOW);
-        tft.fillRoundRect(13, 100, 150, 26, 3, TFT_RED);
+        tft.fillRoundRect(30, 98, 150, 26, 3, TFT_RED);
         tft.print("HIGH RISK");
     }
     else {
         tft.setTextColor(TFT_RED);
-        tft.fillRoundRect(13, 100, 180, 26, 3, TFT_PURPLE);
+        tft.fillRoundRect(30, 98, 180, 26, 3, TFT_PURPLE);
         tft.print("VERY HIGH RISK");
     }
   }
