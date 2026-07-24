@@ -1,4 +1,5 @@
-// Updated May 16/26
+//UPDATED July 23/26
+
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <TFT_eSPI.h>
@@ -32,7 +33,7 @@ bool alertJustAppeared = false;
 #define ALERT_DOT_R 6  // 8 / 4  radius of circle 
 unsigned long lastBlinkTime = 0;
 bool blinkState = true;
-const unsigned long BLINK_INTERVAL = 500; // ms
+const unsigned long BLINK_INTERVAL = 300; // 500 ms 
 
 // ===== Seconds bar =====
 const int totalSegments = 60; // 60
@@ -42,6 +43,27 @@ const int segHeight = 18;
 const int barY = 72;  // position of seconds bar
 int lastBarSec = -1;
 int barStartX;
+
+int aqhiValue = 0;
+// AQHI colours
+uint16_t aqhiColours[] = {
+    TFT_SKYBLUE,      // 1
+    TFT_CYAN,        // 2
+    TFT_BLUE,        // 3
+    TFT_YELLOW,      // 4
+    TFT_GOLD,        // 5
+    TFT_ORANGE,      // 6
+    0xFB20,          // 7 - Orange/Red
+    TFT_RED,         // 8
+    0xA800,          // 9 - Dark Red
+    TFT_MAROON,       // 10
+    TFT_PURPLE        // 10+
+};
+
+////Scroll
+int forecastScroll = 0;
+unsigned long lastScroll = 0;
+
 
 ////
 const char* ntpServer = "pool.ntp.org";
@@ -62,7 +84,7 @@ const char* WEATHER_RSS_URL  = "https://weather.gc.ca/rss/weather/51.046_-114.05
 //const char* WEATHER_RSS_URL  = "https://weather.gc.ca/rss/weather/53.536_-113.494_e.xml";  // Edmonton 
 
 //===== Alert Data =========
-const char* ALERTS_RSS_URL   = "https://weather.gc.ca/rss/battleboard/ab12_e.xml";   // Calgary  
+const char* ALERTS_RSS_URL   = "https://weather.gc.ca/rss/weather/51.046_-114.057_e.xml";   // Calgary  
 //<<your must use the url that indicates "battleboard" - -  alerts may not work correctly otherwise>>
 
 //const char* ALERTS_RSS_URL   = "https://weather.gc.ca/rss/battleboard/mbrm177_e.xml"; // test
@@ -73,7 +95,7 @@ const char* auroraURL = "https://www.aurorawatch.ca/AWVal.txt";   // NOTE: THIS 
 
 // ===== Update intervals (ms) =====
 const unsigned long WEATHER_INTERVAL = 600000UL; // update 15 minutes 900000UL // update 10 minutes 600000UL
-const unsigned long ALERTS_INTERVAL  = 1200000UL; //  update 20 minutes 1200000UL  // 5 min for test 300000UL
+const unsigned long ALERTS_INTERVAL  = 900000UL; //  update 20 minutes 1200000UL  // 5 min for test 300000UL
 const unsigned long AURORA_INTERVAL = 1800000UL; // update 60 minutes 3600000UL  // update 30 minutes 1800000UL
 unsigned long lastWeatherUpdate = 0;
 unsigned long lastAlertsUpdate  = 0;
@@ -92,6 +114,7 @@ String ccPressure    = "";
 String ccWind        = "";
 String ccGust        = "";
 String ccHumidity    = "";
+String ccHumidex     = "";
 String ccDewpoint    = "";
 String ccVisibility  = "";
 String ccWindChill   = "";
@@ -104,14 +127,16 @@ String fc12hrSummary = "";
 
 
 // ===== Alerts =====
-String alertTitle   = "";
-String alertSummary = "";
+String alertTitle = "";
+String alertImpact = "";
+String alertConfidence = "";
+//String alertSummary = "";
 
 // ===== Display paging =====
 enum Page { PAGE_ONE, PAGE_TWO, PAGE_THREE, PAGE_FOUR, PAGE_FIVE, AQHI_PAGE, AURORA_PAGE, ALERT_PAGE, CLOCK_PAGE };
 Page currentPage = PAGE_ONE;
 unsigned long pageTimer = 0;
-const unsigned long PAGE_DURATION = 8000UL; // 10 seconds = 10000UL 8seconds = 8000
+const unsigned long PAGE_DURATION = 4000UL; // 10 seconds = 10000UL | 8 seconds = 8000UL | 5 secomds = 5000UL
 
     ////////////////////////////////////////////////////////////////////////
 // ===== Prototypes =====
@@ -168,6 +193,12 @@ void setup() {
   Serial.begin(115200);
   tft.init();
   tft.setRotation(1);
+
+  if (millis() - lastScroll > 100) {
+    forecastScroll++;
+    lastScroll = millis();
+}
+
   showBootScreen();
   tft.fillScreen(TFT_BLACK);
   setupTime();
@@ -231,7 +262,8 @@ if (timeinfo.tm_hour == 14 && timeinfo.tm_min == 12) { //  this test was for 14:
     }
 }
 */ 
-  ////////////////////////////////////////////////////////////////////////////////////////////////////
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // Enter deep sleep
 struct tm timeinfo;
 if (getLocalTime(&timeinfo)) {
@@ -443,6 +475,17 @@ void fetchWeather() {
       ccWind        = extractLabeledValue(summary, "Wind:");
       ccGust        = extractLabeledValue(summary, "Gust:");
       ccAQHI        = extractLabeledValue(summary, "Air Quality Health Index:");
+      ccAQHI.trim();
+      if (ccAQHI == "10+") {
+          aqhiValue = 11;          // represent 10+ internally as 11
+            }
+      else if (ccAQHI.length() == 0 || ccAQHI == "N/A") {
+        aqhiValue = -1;          // unavailable
+          }
+        else {
+      aqhiValue = ccAQHI.toInt();
+          }
+      ccHumidex     = extractLabeledValue(summary, "Humidex:");
 
       break;
     }
@@ -451,7 +494,12 @@ void fetchWeather() {
     Serial.println(ccObservedAt);
     Serial.println(ccCondition);
     Serial.println(ccTemperature);
-
+    Serial.println(ccHumidity);
+    Serial.println(ccAQHI);
+    Serial.println(ccHumidex);
+Serial.print("AQHI = '");
+Serial.print(ccAQHI);
+Serial.println("'");
   }
 
   http.end();
@@ -519,51 +567,66 @@ void fetchAlerts() {
     Serial.printf("alertTitle: '%s'\n", alertTitle.c_str());
     Serial.printf("alertActive: %d\n", alertActive);
 
-    while (true) {
-      int start = xml.indexOf("<entry>", pos);
-      if (start == -1) break;
-      int end   = xml.indexOf("</entry>", start);
-      if (end == -1) break;
+while (true) {
 
-      String entry = xml.substring(start, end);
+  int start = xml.indexOf("<entry>", pos);
+  if (start == -1) break;
 
-      String title = extractXmlValue(entry, "title");
+  int end = xml.indexOf("</entry>", start);
+  if (end == -1) break;
 
-      title.replace("City of ", "");  // this removes the text "city of " to allow larger alert font
-      title.replace("city of ", "");  // this removes the text"city of " to allow larger alert font
-      title.trim();
-      
-      String summaryHtml = extractXmlValue(entry, "summary");
+  String entry = xml.substring(start, end);
 
-      // Clean CDATA HTML if present
-      summaryHtml.replace("<![CDATA[", "");
-      summaryHtml.replace("]]>", "");
-      summaryHtml.replace("<br/>", "\n");
-      summaryHtml.replace("<br />", "\n");
-      summaryHtml.replace("<b>", "");
-      summaryHtml.replace("</b>", "");
-      summaryHtml.trim();
+  pos = end + 8;
 
-      alertTitle = title;
-      alertSummary = summaryHtml;
-      String t = alertTitle;
-      t.toLowerCase();
+  // Ignore weather conditions and forecasts
+  if (entry.indexOf("Warnings and Watches") == -1) {
+  pos = end + 8;
+    continue;
+  }
+  
+  String title = extractXmlValue(entry, "title");
+  //String impact = extractXmlValue(entry, "impact");
+  //String confidence = extractXmlValue(entry, "confidence");
+  alertImpact = extractXmlValue(entry, "impact");
+  alertConfidence = extractXmlValue(entry, "confidence");
 
-       alertActive =
+  //title.replace("City of ", "");
+  //title.replace("city of ", "");
+  //title.trim();
+
+  //String summaryHtml = extractXmlValue(entry, "summary");
+
+  //summaryHtml.replace("<![CDATA[", "");
+  //summaryHtml.replace("]]>", "");
+  //summaryHtml.replace("<br/>", "\n");
+  //summaryHtml.replace("<br />", "\n");
+  //summaryHtml.replace("<b>", "");
+  //summaryHtml.replace("</b>", "");
+  //summaryHtml.trim();
+
+  alertTitle = title;
+  //alertSummary = summaryHtml;
+
+  String t = alertTitle;
+  t.toLowerCase();
+
+  alertActive =
     (t.indexOf("no alerts") == -1) &&
     (t.indexOf("orange") >= 0 ||
      t.indexOf("yellow") >= 0 ||
      t.indexOf("red") >= 0 ||
-     t.indexOf("special") >= 0);
+     t.indexOf("special") >= 0 ||
+     t.indexOf("air quality") >= 0);
 
-      break;
-    }
+  break;
+}
 
     Serial.printf("Alert title: '%s'\n", alertTitle.c_str());
     Serial.printf("alertActive=%d alertJustAppeared=%d\n",alertActive, alertJustAppeared);
     Serial.println("Parsed Alert:");
     Serial.println(alertTitle);
-    Serial.println(alertSummary);
+    //Serial.println(alertSummary);
   }
   http.end();
 }
@@ -611,9 +674,7 @@ void getAuroraData() {
 }
 
 void drawAuroraBar(int value) {
-
   uint16_t barColor;
-
   if (value >= 80)
     barColor = TFT_RED;
   else if (value > 65)
@@ -622,10 +683,8 @@ void drawAuroraBar(int value) {
     barColor = TFT_GREENYELLOW;
   else
     barColor = TFT_WHITE;
-
   // Clear only bar region
   //tft.fillRect(BAR_X, BAR_Y, BAR_WIDTH, BAR_HEIGHT + 12, TFT_BLACK);
-
   // Outline
   tft.drawRect(BAR_X, BAR_Y, BAR_WIDTH, BAR_HEIGHT, TFT_DARKGREY);
 
@@ -658,15 +717,12 @@ void drawAuroraBar(int value) {
 }
 
 void drawAlertIndicator() {
-
   uint16_t color;
-
   if (alertActive) {
     color = alertColorFor(alertTitle);
   } else {
     color = TFT_DARKCYAN; // no alert
   }
-
   // Handle blinking
   if (alertActive) {
     unsigned long now = millis();
@@ -678,7 +734,6 @@ void drawAlertIndicator() {
   } else {
     blinkState = true; // always visible when no alert
   }
-
   // Draw or erase
   if (blinkState) {
     tft.fillCircle(ALERT_DOT_X, ALERT_DOT_Y, ALERT_DOT_R, color);
@@ -713,7 +768,7 @@ char weatherIconFromCondition(const String &cond) {
   if (c.indexOf("cloudy") >= 0) return 'O'; // overcast - double cloud
 
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  if (c.indexOf("fog patches") >= 0 || c.indexOf("fog") >= 0 || c.indexOf("mist") >= 0 ) return 'F'; // fog cloud
+  if (c.indexOf("fog patches") >= 0 || c.indexOf("fog") >= 0 || c.indexOf("mist") >= 0 ||c.indexOf("smoke") >= 0 || c.indexOf("dust") >= 0 ) return 'F'; // fog cloud
 
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   if (c.indexOf("heavy snow") >= 0) return 'D'; // snow flake 
@@ -730,17 +785,17 @@ char weatherIconFromCondition(const String &cond) {
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   if (c.indexOf("ice pellets") >= 0) return 'L'; // snow cloud
 
-  tft.setTextColor(TFT_BLUE, TFT_BLACK);
+  tft.setTextColor(TFT_RED, TFT_BLACK);
+  if (c.indexOf("thunderstorm") >= 0)  return 'K';
+
+  tft.setTextColor(TFT_SKYBLUE, TFT_BLACK);
   if (c.indexOf("heavy rain") >= 0) return 'B'; // rain
 
-  tft.setTextColor(TFT_BLUE, TFT_BLACK);
+  tft.setTextColor(TFT_SKYBLUE, TFT_BLACK);
   if (c.indexOf("light rain") >= 0|| c.indexOf("drizzle") >= 0 ) return 'M'; // rain cloud
 
-  tft.setTextColor(TFT_BLUE, TFT_BLACK);
+  tft.setTextColor(TFT_SKYBLUE, TFT_BLACK);
   if (c.indexOf("rain") >= 0) return 'M'; // rain cloud
-
-  tft.setTextColor(TFT_YELLOW, TFT_BLACK);
-  if (c.indexOf("thunderstorm") >= 0)  return 'K';
   
     tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
       return 'J'; // unknown umbrella
@@ -773,18 +828,13 @@ String formatObservedTime(String raw) {
 
 
 void drawWordWrappedText(int x, int y, int maxWidth, const String &text) {
-
   int cursorX = x;
   int cursorY = y;
-
   int lineHeight = tft.fontHeight();
   int spaceWidth = tft.textWidth(" ");
-
   tft.setCursor(cursorX, cursorY);
-
   int i = 0;
   while (i < text.length()) {
-
     // Explicit newline
     if (text[i] == '\n') {
       cursorX = x;
@@ -793,21 +843,17 @@ void drawWordWrappedText(int x, int y, int maxWidth, const String &text) {
       i++;
       continue;
     }
-
     // Extract next word
     int start = i;
     while (i < text.length() && text[i] != ' ' && text[i] != '\n') i++;
-
     String word = text.substring(start, i);
     int wordWidth = tft.textWidth(word);
-
     // Wrap if needed
     if (cursorX != x && cursorX + wordWidth > x + maxWidth) {
       cursorX = x;
       cursorY += lineHeight;
       tft.setCursor(cursorX, cursorY);
     }
-
     // Draw word
     tft.print(word);
     cursorX += wordWidth;
@@ -868,7 +914,7 @@ void updateSecondsBar(int sec) {
   lastBarSec = sec;
 }
 
-// ===== Display Functions =====
+///////// ===== Display Functions =====
 void drawPageOne() {
   tft.setTextSize(2);
   tft.setTextColor(TFT_GREEN);
@@ -920,23 +966,31 @@ tft.printf("Dewpoint:\n");
     tft.setTextSize(3);
     tft.printf("     %s C\n", ccDewpoint.c_str());
   }
-  if (ccWindChill.length()) {  // windchill data is only present when temp is below zero
-    tft.setTextSize(1);
+tft.setTextSize(1);
+
+if (ccWindChill.length()) {  // windchill data is only present when temp is below zero
     tft.setTextColor(TFT_SKYBLUE);
-    tft.printf("Windchill:\n");
+    tft.printf("Windchill:\n\n");
     tft.setTextSize(3);
-    tft.printf("   %s.o", ccWindChill.c_str());
-    }else {
-    tft.setTextSize(1);
+    tft.printf("  %s C", ccWindChill.c_str());
+
+} else if (ccHumidex.length()) {  // Humidex data is only present when ambient temp above 19 and humidty is high
+    tft.setTextColor(TFT_MAGENTA);
+    tft.printf("Humidex:\n\n");
+    tft.setTextSize(3);
+    tft.printf("  %s C", ccHumidex.c_str());
+
+} else {
     tft.setTextColor(TFT_DARKGREY);
-    tft.printf("Windchill:\n");
-    tft.setTextSize(3);
-    tft.printf("  --");
-  }
+    tft.printf("Windchill / Humidex:\n\n");
+    tft.setTextSize(2);
+    tft.printf("    n/a");
+}
+
   //Current Time shown bottom right corner
    struct tm timeinfo;
   if (!getLocalTime(&timeinfo)) {
-    tft.drawString("Time Error", 10, 10, 2);
+    tft.drawString("Error", 196, 124, 1);
     return;
   }
   char hourMin[6];
@@ -947,7 +1001,7 @@ tft.printf("Dewpoint:\n");
   strftime(hourMin, sizeof(hourMin), "%l:%M", &timeinfo); // 12hr clock no leading zero - hours:minutes 
   tft.setTextSize(3);
   tft.setTextColor(TFT_GREENYELLOW);
-  tft.fillRoundRect(146, 110, 100, 25, 10, TFT_DARKCYAN);  //150, 110, 94, 30
+  tft.fillRoundRect(146, 110, 100, 25, 10, TFT_BLUE);  //150, 110, 94, 30
   tft.drawString(hourMin, 196, 124); // time  206, 128
 }
 
@@ -957,7 +1011,7 @@ tft.printf("Dewpoint:\n");
     tft.setTextSize(2);
     tft.setCursor(0, 0);  // 0,66 
     tft.setTextColor(TFT_SKYBLUE);
-    tft.printf("Wind:");
+    tft.printf("Wind Velocity:");
     tft.setTextSize(3);
     drawWordWrappedText(20, 16, tft.width(), ccWind);
     //tft.printf("%s\n", ccWind.c_str());
@@ -967,7 +1021,7 @@ tft.printf("Dewpoint:\n");
     tft.setTextSize(2);
     tft.setTextColor(TFT_WHITE);
     tft.setCursor(0, 70);
-    tft.printf("Barometric Pressure:\n");
+    tft.printf("Barometric Press:\n");
     tft.setTextSize(3);
     tft.setTextColor(TFT_WHITE);
     drawWordWrappedText(10, 86, tft.width(), ccPressure);
@@ -976,7 +1030,7 @@ tft.printf("Dewpoint:\n");
   //Current Time shown bottom right corner
    struct tm timeinfo;
   if (!getLocalTime(&timeinfo)) {
-    tft.drawString("Time Error", 10, 10, 2);
+    tft.drawString("Error", 196, 124, 1);
     return;
   }
   char hourMin[6];
@@ -987,40 +1041,24 @@ tft.printf("Dewpoint:\n");
   strftime(hourMin, sizeof(hourMin), "%l:%M", &timeinfo); // 12hr clock no leading zero - hours:minutes 
   tft.setTextSize(3);
   tft.setTextColor(TFT_GREENYELLOW);
-  tft.fillRoundRect(146, 110, 100, 25, 10, TFT_DARKCYAN);  //150, 110, 94, 30
+  tft.fillRoundRect(146, 110, 100, 25, 10, TFT_BLUE);  //150, 110, 94, 30
   tft.drawString(hourMin, 196, 124); // time  206, 128
 
 }
-  /*
-  //Current Time shown mid right next to trend
-   struct tm timeinfo;
-  if (!getLocalTime(&timeinfo)) {
-    tft.drawString("Time Error", 10, 10, 2);
-    return;
-  }
-  char hourMin[6];
-  char seconds[4];
-  char ampm[3];
-  //strftime(hourMin, sizeof(hourMin), "%H:%M", &timeinfo); // 24hr clock - hours:minutes
-  //strftime(hourMin, sizeof(hourMin), "%I:%M", &timeinfo); // 12hr clock with leading zero - hours:minutes 
-  strftime(hourMin, sizeof(hourMin), "%l:%M", &timeinfo); // 12hr clock no leading zero - hours:minutes 
-  tft.setTextSize(3);
-  tft.setTextColor(TFT_BLACK);
-  tft.fillRoundRect(150, 42, 96, 24, 10, TFT_GREEN);
-  tft.drawString(hourMin, 196, 56);
-}
-*/
-////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 void drawPageFour(){
   tft.setTextSize(3);
   tft.setTextColor(TFT_WHITE);
-  drawWordWrappedText(0, 0, tft.width(), fc6hrTitle);
+  drawWordWrappedText(0, 0, tft.width(), fc6hrTitle);  //fc6hrSummary
+  //drawWordWrappedText(0, 0, tft.width(), fc6hrSummary);
+  //drawWordWrappedText(0, 35 - forecastScroll, tft.width(), fc6hrSummary);
 }
 
 void drawPageFive(){
   tft.setTextSize(3);
   tft.setTextColor(TFT_WHITE);
-  drawWordWrappedText(0, 0, tft.width(), fc12hrTitle);
+  drawWordWrappedText(0, 0, tft.width(), fc12hrTitle);  //fc12hrSummary
+  //drawWordWrappedText(0, 0, tft.width(), fc12hrSummary);
 }
 
 void drawAqhiPage(){
@@ -1028,28 +1066,107 @@ void drawAqhiPage(){
   tft.setTextColor(TFT_WHITE);
   tft.setCursor(0, 0);
 if (ccAQHI.length()) {
+  if (aqhiValue < 0) { ////
+    tft.printf("Air Quality\n");
+    tft.printf("Health Index:\n\n");
+    tft.fillRoundRect(156, 6, 60, 40, 4, TFT_DARKGREY);
+    tft.drawRoundRect(156, 6, 60, 40, 4, TFT_LIGHTGREY);
+    tft.setTextColor(TFT_BLACK);
+    tft.setTextSize(2);
+    tft.drawCentreString("N/A", 186, 18, 1);
+    // Draw all segments greyed out
+    int x = 10;
+    int y = 55;
+    for (int i = 0; i < 11; i++) {
+        tft.fillRoundRect(x, y, 18, 18, 3, TFT_DARKGREY);
+        tft.setTextColor(TFT_WHITE);
+        tft.setTextSize(1);
+        if (i == 9) {
+            tft.setCursor(x + 2, y + 22);
+            tft.print("10+");
+        } else {
+            tft.setCursor(x + 6, y + 22);
+            tft.print(i + 1);
+        }
+        x += 20;
+    }
+    tft.setTextColor(TFT_LIGHTGREY);
+    tft.setTextSize(2);
+    tft.setCursor(55, 105);
+    tft.print("UNAVAILABLE");
+    return;
+}  ////
 tft.printf("Air Quality\n");
 tft.printf("Health Index: \n\n");
-    tft.setTextSize(4); // 6
-    tft.printf("  < %s >", ccAQHI.c_str());
-  }
-  //Current Time shown bottom right corner
-   struct tm timeinfo;
-  if (!getLocalTime(&timeinfo)) {
-    tft.drawString("Time Error", 10, 10, 2);
-    return;
-  }
-  char hourMin[6];
-  char seconds[4];
-  char ampm[3];
-  //strftime(hourMin, sizeof(hourMin), "%H:%M:", &timeinfo); // 24hr clock - hours:minutes
-  //strftime(hourMin, sizeof(hourMin), "%I:%M", &timeinfo); // 12hr clock with leading zero - hours:minutes 
-  strftime(hourMin, sizeof(hourMin), "%l:%M", &timeinfo); // 12hr clock no leading zero - hours:minutes 
-  tft.setTextSize(3);
-  tft.setTextColor(TFT_GREENYELLOW);
-  tft.fillRoundRect(146, 110, 100, 25, 10, TFT_DARKCYAN);
-  tft.drawString(hourMin, 196, 124); // time  206, 128
+int displayAQHI = constrain(aqhiValue, 1, 11);
+uint16_t boxColour = aqhiColours[displayAQHI - 1];
+tft.fillRoundRect(154, 6, 70, 40, 4, boxColour);
+tft.drawRoundRect(154, 6, 70, 40, 4, TFT_LIGHTGREY);
+ 
+String aqhiText;
+    if (aqhiValue >= 11)
+        aqhiText = "10+";
+    else
+        aqhiText = String(aqhiValue);
+tft.setTextColor(TFT_BLACK);
+tft.setTextSize(4);
+tft.drawCentreString(aqhiText, 190, 12, 1); // 186,12,1
+  
+    // Draw the coloured squares
+    int x = 10;
+    int y = 55;
+  for (int i = 0; i < 11; i++) {
+    uint16_t colour = aqhiColours[i];
+    bool active;
+    if (i < 10)
+        active = (i + 1) <= aqhiValue;
+    else
+        active = (aqhiValue >= 11);   // Last box is 10+
+    if (!active)
+        colour = TFT_DARKGREY;
+    tft.fillRoundRect(x, y, 18, 18, 3, colour);
+    tft.setTextColor(TFT_WHITE);
+    tft.setTextSize(1);
+    if (i == 10) {
+      // 10+ label
+      tft.setCursor(x + 1, y + 22);
+      tft.print("10+");
+      }
+      else if (i == 9) {
+          // 10 label
+          tft.setCursor(x + 3, y + 22);   // Adjust this value to suit
+          tft.print("10");
+      }
+      else {
+          // 1–9 labels
+          tft.setCursor(x + 6, y + 22);
+          tft.print(i + 1);
+      }
 
+    x += 19;
+}
+    // Risk category
+    tft.setTextSize(2);
+    tft.setCursor(20, 105); // 20,105
+    if (aqhiValue <= 3) {
+        tft.setTextColor(TFT_CYAN);
+        tft.print("LOW RISK");
+    }
+    else if (aqhiValue <= 6) {
+        tft.setTextColor(TFT_YELLOW);
+        tft.print("MODERATE RISK");
+    }
+    else if (aqhiValue <= 9) {
+        tft.setTextColor(TFT_YELLOW);
+        tft.fillRoundRect(13, 100, 150, 26, 3, TFT_RED);
+        tft.print("HIGH RISK");
+    }
+    else {
+        tft.setTextColor(TFT_RED);
+        tft.fillRoundRect(13, 100, 180, 26, 3, TFT_PURPLE);
+        tft.print("VERY HIGH RISK");
+    }
+  }
 }
 
 void drawAuroraPage() {
@@ -1083,7 +1200,7 @@ void drawAuroraPage() {
   //Current Time shown bottom right corner
    struct tm timeinfo;
   if (!getLocalTime(&timeinfo)) {
-    tft.drawString("Time Error", 10, 10, 2);
+    tft.drawString("Error", 196, 124, 1);  //tft.drawString("Time Error", 10, 10, 2);
     return;
   }
   char hourMin[6];
@@ -1094,7 +1211,7 @@ void drawAuroraPage() {
   strftime(hourMin, sizeof(hourMin), "%l:%M", &timeinfo); // 12hr clock no leading zero - hours:minutes 
   tft.setTextSize(3);
   tft.setTextColor(TFT_GREENYELLOW);
-  tft.fillRoundRect(146, 110, 100, 25, 10, TFT_DARKCYAN);
+  tft.fillRoundRect(146, 110, 100, 25, 10, TFT_BLUE);
   tft.drawString(hourMin, 196, 124); // time  206, 128
 }
 
@@ -1104,10 +1221,26 @@ void drawAlertPage() {
   tft.setTextColor(c);
   drawWordWrappedText(0, 0, tft.width(), alertTitle);
 
+  tft.setCursor(0, 102); // x= left/right  y= up/down
+tft.setTextSize(2);
+
+// Only show Impact if it exists
+if (alertImpact.length() > 0) {
+    tft.printf("IL: %s\n", alertImpact.c_str());
+}
+// Only show Confidence if it exists
+if (alertConfidence.length() > 0) {
+    tft.printf("FC: %s\n", alertConfidence.c_str());
+}
+  //tft.setCursor(0, 102); // x= left/right  y= up/dwn
+  //tft.setTextSize(2);
+  //tft.printf("Impt:%s\n", alertImpact==""?" - -":alertImpact.c_str());
+  //tft.printf("Cfdc:%s\n", alertConfidence==""?" - -":alertConfidence.c_str());
+/*
   //Current Time shown bottom right corner
    struct tm timeinfo;
   if (!getLocalTime(&timeinfo)) {
-    tft.drawString("Time Error", 10, 10, 2);
+    tft.drawString("Error", 196, 124, 1); //tft.drawString("Time Error", 10, 10, 2);
     return;
   }
   char hourMin[6];
@@ -1118,8 +1251,9 @@ void drawAlertPage() {
   strftime(hourMin, sizeof(hourMin), "%l:%M", &timeinfo); // 12hr clock no leading zero - hours:minutes 
   tft.setTextSize(3);
   tft.setTextColor(TFT_GREENYELLOW);
-  tft.fillRoundRect(146, 110, 100, 25, 10, TFT_DARKCYAN);
+  tft.fillRoundRect(146, 110, 100, 25, 10, TFT_BLUE);
   tft.drawString(hourMin, 196, 124); // time  206, 128
+  */
 }
 
 void enterClockPage() {
@@ -1155,35 +1289,41 @@ void drawClockPage() {
  
   // ===== TIME (unchanged) =====
   tft.setTextDatum(MC_DATUM);
-  tft.fillRoundRect(0, 0, 270, 67, 30, TFT_TRANSPARENT); // tft.fillRoundRect(0, 0, 270, 67, 30, TFT_DARKCYAN);
+  tft.fillRoundRect(0, 0, 270, 67, 30, TFT_BLUE); // tft.fillRoundRect(0, 0, 270, 67, 30, TFT_DARKCYAN); //TFT_TRANSPARENT
   tft.setTextSize(7);
   tft.setTextColor(TFT_GREEN);
   tft.drawString(hourMin, 120, 36); // time
   tft.setTextSize(2);
-  tft.setTextColor(TFT_DARKGREY);
+  tft.setTextColor(TFT_LIGHTGREY);
   tft.drawString(tzStr, 120, 60); // timezone shown below colon
   tft.setTextSize(2);
   tft.setTextColor(TFT_WHITE);
   tft.drawString(ampm, 120, 8); // am/pm shown above colon
 
   // ===== DATE =====
-  tft.fillRect(0, 95, 270, 44, TFT_DARKGREEN);
+  //tft.fillRect(0, 95, 270, 44, TFT_TRANSPARENT);
+  tft.fillRect(0, 94, 270, 4, TFT_DARKGREEN); // changed this to five stripes behind date
+  tft.fillRect(0, 102, 270, 4, TFT_DARKGREEN);
+  tft.fillRect(0, 110, 270, 4, TFT_DARKGREEN);
+  tft.fillRect(0, 118, 270, 4, TFT_DARKGREEN);
+  tft.fillRect(0, 126, 270, 4, TFT_DARKGREEN);
   tft.setTextSize(4);
   tft.setTextColor(TFT_WHITE);
-  tft.drawString(dateStr, 120, 116); // 120,110
+  tft.drawString(dateStr, 120, 114); // 120,110 , 116
 
   // ===== ADD THIS LINE (seconds bar) =====
   updateSecondsBar(timeinfo.tm_sec);
+  //delay(200);
 }
 
   uint16_t alertColorFor(const String &title) {
   String t = title;
   t.toLowerCase();
-  if (t.indexOf("red") >= 0) return TFT_RED;
+  if (t.indexOf("ended") >= 0)  return TFT_GREEN;
+  if (t.indexOf("red") >= 0)    return TFT_RED;
   if (t.indexOf("orange") >= 0) return TFT_ORANGE;
   if (t.indexOf("yellow") >= 0) return TFT_YELLOW;
   if (t.indexOf("special") >= 0) return TFT_MAGENTA;   //  TFT_DARKCYAN;   // 
-
   return TFT_LIGHTGREY; /// TFT_DARKGREY
 }
 
@@ -1210,3 +1350,4 @@ String extractLabeledValue(const String &src, const String &label) {
   val.trim();
   return val;
 }
+
