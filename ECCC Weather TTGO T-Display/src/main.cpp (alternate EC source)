@@ -1143,23 +1143,33 @@ tft.drawCentreString(aqhiText, 190, 12, 1); // 186,12,1
 }
     // Risk category
     tft.setTextSize(2);
-    tft.setCursor(36, 105); // 20,105
-    if (aqhiValue <= 3) {
+    //tft.setCursor(36, 105); // 20,105
+    if (aqhiValue <= 1) {  // <= 1
+        tft.setCursor(70, 94);
+        tft.setTextColor(TFT_BLUE);
+        tft.fillRoundRect(64, 88, 106, 26, 3, TFT_SKYBLUE);  //60, 98, 120, 26, 3, TFT_SKYBLUE
+        tft.print("LOW RISK");
+    }
+    else if (aqhiValue <= 3) {  // <= 3
+        tft.setCursor(70, 94);
         tft.setTextColor(TFT_CYAN);
         tft.print("LOW RISK");
     }
-    else if (aqhiValue <= 6) {
+    else if (aqhiValue <= 6) {  // <= 6
+        tft.setCursor(40, 94);
         tft.setTextColor(TFT_YELLOW);
         tft.print("MODERATE RISK");
     }
-    else if (aqhiValue <= 9) {
+    else if (aqhiValue <= 9) {  //  <= 9
+        tft.setCursor(66, 94);
         tft.setTextColor(TFT_YELLOW);
-        tft.fillRoundRect(30, 98, 150, 26, 3, TFT_RED);
+        tft.fillRoundRect(60, 88, 120, 26, 3, TFT_RED);
         tft.print("HIGH RISK");
     }
     else {
-        tft.setTextColor(TFT_RED);
-        tft.fillRoundRect(30, 98, 180, 26, 3, TFT_PURPLE);
+        tft.setCursor(32, 94);
+        tft.setTextColor(TFT_YELLOW);
+        tft.fillRoundRect(26, 88, 178, 26, 3, TFT_PURPLE);
         tft.print("VERY HIGH RISK");
     }
   }
