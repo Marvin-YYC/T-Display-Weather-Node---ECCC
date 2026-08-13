@@ -1,0 +1,1593 @@
+//BETA
+//BETA
+//BETA
+// includes: Clock page + clock insert - AQHI Scale and Indicator - Aurora Watch data - two day forecast - colour coded Weather Alert Indicator - deep sleep
+// Updated and streamlined weather data fetch
+//ALL NEW This works, using public data source not from NavCan weather station
+// Aug 12/26
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <TFT_eSPI.h>
+#include <time.h>
+#include "WeatherFont60.h"   /// BE SURE TO ADD THE WEATHERFONT60 FILE
+
+//Backlight
+const uint8_t brightnessLevels[] = { 4, 20, 60, 120, 180, 255 };
+const uint8_t NUM_LEVELS = sizeof(brightnessLevels);
+uint8_t brightnessIndex = 1;  
+#define BTN_BRIGHTNESS  0   // Left button
+const int pwmChannel = 0;
+#define BACKLIGHT_PIN 4
+#define BACKLIGHT_CHANNEL 0
+#define BACKLIGHT_FREQ 5000
+#define BACKLIGHT_RES 8  
+#define BUTTON_PIN 0   // TTGO Left front button controls screen brightness
+
+/// Aurora Bar Graph
+#define BAR_WIDTH   200
+#define BAR_HEIGHT  18
+#define BAR_X       20
+#define BAR_Y       70
+
+bool alertActive = false;
+bool alertJustAppeared = false;
+void checkScheduledFetches();
+
+//AQHI Indicator top right box
+#define AQHI_BOX_X 226 // 228 //226
+#define AQHI_BOX_Y 0 // 14
+#define AQHI_BOX_W 14 // 12
+#define AQHI_BOX_H 14 // 12 / 10
+
+//Alert active indicator dot/triangle below AQHI box
+#define ALERT_DOT_X (tft.width() - 7) // -8 (tft.width() - 10)
+#define ALERT_DOT_Y 22 // 6 / 10
+#define ALERT_DOT_R 6  // 6 / 8 / 4  radius of circle 
+unsigned long lastBlinkTime = 0;
+bool blinkState = true;
+const unsigned long BLINK_INTERVAL = 150; // 250 / 500 ms 
+
+//Fetch Schedule
+bool weatherStartupFetchDone = false;
+bool auroraStartupFetchDone = false;
+int lastWeatherFetchMinute = -1;
+int lastAuroraFetchMinute = -1;
+
+// ===== Seconds bar =====
+const int totalSegments = 60; // 60
+const int segWidth = 2;
+const int segGap = 2;
+const int segHeight = 18;
+const int barY = 72;  // position of seconds bar
+int lastBarSec = -1;
+int barStartX;
+
+//uint16_t TFT_SKY tft.color565(0, 160, 255);     //0x051F - 
+//uint16_t TFT_DEEPSKY tft.color565(0, 128, 224); //0x041C - 
+//uint16_t TFT_TEALBLUE tft.color565(0, 96, 192); //0x0318 - 
+
+int aqhiValue = 0;
+// AQHI colours
+uint16_t aqhiColours[] = {
+    0x051F,          // 1 - SKY
+    0x041C,          // 2 - DEEPSKY
+    TFT_BLUE,        // 3
+    TFT_YELLOW,      // 4
+    TFT_GOLD,        // 5
+    TFT_ORANGE,      // 6
+    0xFB20,          // 7 - Orange/Red
+    TFT_RED,         // 8
+    0xA800,          // 9 - Dark Red
+    TFT_MAROON,      // 10
+    TFT_PURPLE       // 10+
+};
+
+////Scroll
+int forecastScroll = 0;
+unsigned long lastScroll = 0;
+
+////
+const char* ntpServer = "pool.ntp.org";
+
+void setupTime() {
+  configTzTime("MST7MDT,M3.2.0/2,M11.1.0/2", "pool.ntp.org"); // <<<<<<<<<<<< insert your POSIX timezone here
+}
+/////
+
+// ===== WiFi =====
+const char* SSID     = "YOUR_SSID";   //  YOUR_SSID >>>>>>>>>>> EDIT <<<<<<<<<<<<<<
+const char* PASSWORD = "YOUR_SSID_PASSWORD";   // YOUR_SSID_PASSWORD >>>>>>>>>>>>>> EDIT <<<<<<<<<<<
+
+// ===== URLs =====
+//===== Weather Data ======
+const char* WEATHER_RSS_URL  = "https://weather.gc.ca/rss/weather/51.046_-114.057_e.xml"; // Calgary 
+//const char* WEATHER_RSS_URL  = "https://weather.gc.ca/rss/weather/47.384_-61.867_e.xml";  //Cap-aux-Meules
+
+//const char* WEATHER_RSS_URL  = "https://weather.gc.ca/rss/weather/53.536_-113.494_e.xml";  // Edmonton 
+
+//===== Alert Data =========
+//const char* ALERTS_RSS_URL   = "https://weather.gc.ca/rss/weather/51.046_-114.057_e.xml";   // Calgary  
+//<<your must use the url that indicates "battleboard" - -  alerts may not work correctly otherwise>>
+
+//const char* ALERTS_RSS_URL   = "https://weather.gc.ca/rss/battleboard/mbrm177_e.xml"; // test
+//const char* ALERTS_RSS_URL   = "https://weather.gc.ca/rss/battleboard/bcrm28_e.xml"; // test 
+
+//====== Aurora Watch Data ===========
+const char* auroraURL = "https://www.aurorawatch.ca/AWVal.txt";   // NOTE: THIS WEBSITE ONLY UPDATES ONCE PER HOUR AT :11 MINUTES PAST THE HOUR.
+
+// ===== Update intervals (ms) =====
+//const unsigned long WEATHER_INTERVAL = 600000UL; // update 15 minutes 900000UL // update 10 minutes 600000UL  // 660000 11 min
+//const unsigned long ALERTS_INTERVAL  = 660000UL; //  900000UL 15min // update 20 minutes 1200000UL  // 5 min for test 300000UL
+//const unsigned long AURORA_INTERVAL = 1800000UL; // update 60 minutes 3600000UL  // update 30 minutes 1800000UL
+//unsigned long lastWeatherUpdate = 0;
+//unsigned long lastAlertsUpdate  = 0;
+//unsigned long lastAuroraUpdate = 0;
+int auroraValue = 0;
+bool auroraValid = false;
+
+// ===== TFT =====
+TFT_eSPI tft = TFT_eSPI();
+
+// ===== Parsed Weather =====
+String ccObservedAt  = "";
+String ccCondition   = "";
+String ccTemperature = "";
+String ccPressure    = "";
+String ccWind        = "";
+String ccGust        = "";
+String ccHumidity    = "";
+String ccHumidex     = "";
+String ccDewpoint    = "";
+String ccVisibility  = "";
+String ccWindChill   = "";
+String ccAQHI        = "";
+String ccUpdated     = "";
+String fc6hrTitle    = "";
+String fc6hrSummary  = "";
+String fc12hrTitle   = "";
+String fc12hrSummary = "";
+
+
+// ===== Alerts =====
+String alertTitle = "";
+String alertImpact = "";
+String alertConfidence = "";
+//String alertSummary = "";
+
+// ===== Display paging =====
+enum Page { PAGE_ONE, PAGE_TWO, PAGE_THREE, PAGE_FOUR, PAGE_FIVE, AQHI_PAGE, AURORA_PAGE, ALERT_PAGE, CLOCK_PAGE };
+Page currentPage = PAGE_ONE;
+unsigned long pageTimer = 0;
+const unsigned long PAGE_DURATION = 4000UL; // 10 seconds = 10000UL | 8 seconds = 8000UL | 5 secomds = 5000UL
+
+    ////////////////////////////////////////////////////////////////////////
+// ===== Prototypes =====
+void connectWiFi();
+//void fetchWeatherRSS();
+void fetchWeather();
+//void fetchForecast24h(const String &xml);
+//void fetchAlerts();
+void getAuroraData();
+
+String extractXmlValue(const String &xml, const String &tag);
+String extractLabeledValue(const String &src, const String &label);
+uint16_t alertColorFor(const String &title);
+String formatObservedTime(String raw);
+
+void drawPageOne();
+void drawPageTwo();
+void drawPageThree();
+void drawPageFour();
+void drawPageFive();
+void drawAqhiPage();
+void drawAuroraPage();
+void drawAlertPage();
+void drawClockPage();
+void drawAlertIndicator();
+void drawAQHIIndicator();
+
+  void showBootScreen() {
+      tft.fillScreen(TFT_BLACK);
+      tft.setTextDatum(MC_DATUM); 
+      tft.setTextColor(TFT_CYAN, TFT_BLACK);
+
+      tft.setTextSize(2);
+      tft.drawString("Third Planet", tft.width() / 2, 20);
+      tft.drawString("Weather Node", tft.width() / 2, 40);
+      tft.loadFont(weatherfont60);
+      tft.setTextColor(TFT_BLUE, TFT_BLACK);
+      tft.drawString("L                   M", tft.width() / 2, 64);
+      tft.unloadFont();
+      delay(1500);
+      tft.setTextColor(TFT_WHITE, TFT_BLACK);
+      tft.setTextSize(1);
+      tft.drawString("observation from:", tft.width() / 2, 60);
+      tft.drawString("Environment Canada", tft.width() / 2, 70);
+      tft.drawString("UofA - AuroraWatch.ca", tft.width() / 2, 80);
+      delay(1500);
+      tft.drawString("Firmware running", tft.width() / 2, 100);
+      tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+      delay(1500);
+      tft.drawString("Initializing...", tft.width() / 2, 120);
+      delay(1500);
+      }
+
+// ===== Setup =====
+void setup() {
+  Serial.begin(115200);
+  tft.init();
+  tft.setRotation(1);
+
+  if (millis() - lastScroll > 100) {
+    forecastScroll++;
+    lastScroll = millis();
+}
+  showBootScreen();
+  tft.fillScreen(TFT_BLACK);
+  setupTime();
+  Serial.printf("setup time void setup");
+  int totalWidth = totalSegments * (segWidth + segGap);
+  barStartX = (240 - totalWidth) / 2;
+
+  pinMode(BTN_BRIGHTNESS, INPUT_PULLUP);
+  ledcSetup(BACKLIGHT_CHANNEL, BACKLIGHT_FREQ, BACKLIGHT_RES);
+  ledcAttachPin(BACKLIGHT_PIN, BACKLIGHT_CHANNEL);
+  ledcWrite(BACKLIGHT_CHANNEL, 20);  // Start at low brightness
+
+  connectWiFi();
+  fetchWeather();
+  //fetchAlerts();
+  //lastAuroraUpdate = millis() - AURORA_INTERVAL;
+
+  pageTimer = millis();
+  drawPageOne();
+}
+void handleBrightnessButton() {
+  static bool lastState = HIGH;
+  static unsigned long lastDebounce = 0;
+
+  bool current = digitalRead(BTN_BRIGHTNESS);
+
+  if (current != lastState) {
+    lastDebounce = millis();
+  }
+
+  if ((millis() - lastDebounce) > 50) { 
+    if (lastState == HIGH && current == LOW) {
+      brightnessIndex++;
+      if (brightnessIndex >= NUM_LEVELS) brightnessIndex = 0;
+
+      ledcWrite(pwmChannel, brightnessLevels[brightnessIndex]);
+
+      Serial.printf("Brightness: %d\n",
+        brightnessLevels[brightnessIndex]);
+    }
+  }
+
+  lastState = current;
+}
+
+// ===== Main Loop =====
+void loop() {
+  unsigned long now = millis();
+  handleBrightnessButton();
+  checkScheduledFetches();
+  static bool lastAlertState = false;
+  drawAQHIIndicator();
+
+/*
+// Enter deep sleep - SHORT SLEEP TEST
+struct tm timeinfo;
+if (getLocalTime(&timeinfo)) {
+if (timeinfo.tm_hour == 14 && timeinfo.tm_min == 12) { //  this test was for 14:12 (2:12pm)
+  Serial.println("Entering Deep Sleep for 3 minutes...");
+  esp_sleep_enable_timer_wakeup(3 * 60 * 1000000); // 3 minutes
+  esp_deep_sleep_start();
+    }
+}
+*/ 
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Enter deep sleep
+struct tm timeinfo;
+if (getLocalTime(&timeinfo)) {
+if (timeinfo.tm_hour >= 23) {    //   Begin deep sleeps at 23:00hrs wakes up when timer expires
+  Serial.println("Entering Deep Sleep...");
+  esp_sleep_enable_timer_wakeup((uint64_t)8 * 60 * 60 * 1000000); // 8 hours - wakes up after timer ends.  
+  //Timer is not accurate when in deep sleep. It may wake up a several minutes early/late.
+  esp_deep_sleep_start();
+  }
+}
+
+if (alertActive != lastAlertState) {
+  pageTimer = now;
+  currentPage = PAGE_ONE;
+  tft.fillScreen(TFT_BLACK);
+  lastAlertState = alertActive;
+}
+
+  // Weather update
+  //if (now - lastWeatherUpdate > WEATHER_INTERVAL) {
+    //fetchWeather();
+    //tft.fillScreen(TFT_BLACK);
+    //lastWeatherUpdate = now;
+  //}
+
+  // Alerts update
+  //if (now - lastAlertsUpdate > ALERTS_INTERVAL) {
+    //fetchAlerts();
+    //lastAlertsUpdate = now;
+  //}
+
+  //if (millis() - lastAuroraUpdate >= AURORA_INTERVAL) {
+  //lastAuroraUpdate = millis();
+  //getAuroraData();
+//}
+
+ // Page switching
+  if (now - pageTimer > PAGE_DURATION) {
+    pageTimer = now;
+
+    switch (currentPage) {
+      case PAGE_ONE:
+        currentPage = PAGE_TWO;
+        break;
+
+      case PAGE_TWO:
+        currentPage = PAGE_THREE;
+        break;
+
+      case PAGE_THREE:
+        currentPage = PAGE_FOUR;
+        break;
+
+      case PAGE_FOUR:
+        currentPage = PAGE_FIVE;
+        break;
+
+      case PAGE_FIVE:
+        currentPage = AQHI_PAGE;
+        break;
+
+      case AQHI_PAGE:
+        currentPage = AURORA_PAGE;
+        break;
+
+      case AURORA_PAGE:
+        currentPage = ALERT_PAGE;
+        break;
+
+      case ALERT_PAGE:
+        currentPage = CLOCK_PAGE;
+        lastBarSec = -1;
+        break;
+
+      default:
+        currentPage = PAGE_ONE;
+        break;
+    }
+
+    tft.fillScreen(TFT_BLACK);
+  }
+
+  // Draw current page
+  if (currentPage == PAGE_ONE) {
+    drawPageOne();
+  }
+  else if (currentPage == PAGE_TWO) {
+    drawPageTwo();
+  }
+  else if (currentPage == PAGE_THREE) {
+    drawPageThree();
+  }
+  else if (currentPage == PAGE_FOUR) {
+    drawPageFour();
+  }
+  else if (currentPage == PAGE_FIVE) {
+    drawPageFive();
+  }
+  else if (currentPage == AQHI_PAGE) {
+    drawAqhiPage();
+  }
+  else if (currentPage == AURORA_PAGE) {
+  drawAuroraPage();
+}
+else if (currentPage == ALERT_PAGE) {
+  drawAlertPage();
+}
+  else {
+    drawClockPage();
+    //Serial.printf("drawclockpage");
+    drawAlertIndicator();
+}
+ // if (currentPage != CLOCK_PAGE) {
+ // drawAlertIndicator();
+//}
+ ///////////////////////////////////////////////////////////
+
+  delay(50); // light yield
+
+  //Brightness button
+  static bool lastBtn = HIGH;
+  bool btn = digitalRead(BTN_BRIGHTNESS);
+
+  if (lastBtn == HIGH && btn == LOW) {
+    brightnessIndex = (brightnessIndex + 1) % NUM_LEVELS;
+    ledcWrite(BACKLIGHT_CHANNEL, brightnessLevels[brightnessIndex]);
+
+    Serial.printf("Brightness level: %d\n",
+                  brightnessLevels[brightnessIndex]);
+
+    delay(250); // debounce
+  }
+  drawAlertIndicator();
+  lastBtn = btn;
+}
+void checkScheduledFetches() {
+  time_t now = time(nullptr);
+  struct tm *timeinfo = localtime(&now);
+  int minute = timeinfo->tm_min;
+  // WEATHER
+  // Startup fetch
+  if (!weatherStartupFetchDone) {
+    Serial.println("Startup weather fetch...");
+    fetchWeather();
+    weatherStartupFetchDone = true;
+    lastWeatherFetchMinute = minute;
+  }
+  // WEATHER SCHEDULE
+  // :02, :05, :07, :10, then every 10 minutes
+  if (minute == 2 ||
+      minute == 5 ||
+      minute == 7 ||
+      minute == 10 ||
+      minute == 20 ||
+      minute == 30 ||
+      minute == 40 ||
+      minute == 50) {
+    if (lastWeatherFetchMinute != minute) {
+      Serial.printf("  Scheduled WEATHER Fetch at :%02d\n", minute);
+      fetchWeather();
+      lastWeatherFetchMinute = minute;
+    }
+  }
+  // AURORA
+  // Startup fetch
+  if (!auroraStartupFetchDone) {
+    Serial.println("Startup Aurora fetch...");
+    getAuroraData();
+    auroraStartupFetchDone = true;
+    lastAuroraFetchMinute = minute;
+  }
+  // AURORA SCHEDULE
+  // :12 every hour // Aurora Watch website updates hourly at :11 min past the hour (made it :12 for delay.)
+  if (minute == 12) {
+    if (lastAuroraFetchMinute != minute) {
+      Serial.println("Scheduled Aurora Fetch at :12");
+      getAuroraData();
+      lastAuroraFetchMinute = minute;
+    }
+  }
+}
+
+// ===== WiFi =====
+void connectWiFi() {
+  WiFi.begin(SSID, PASSWORD);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500); Serial.print(".");
+  }
+  Serial.println("\nWiFi connected!");
+}
+
+// ===== Fetch and Parse Weather, Forecast & Alerts =====
+void fetchWeather() {
+  HTTPClient http;
+  http.begin(WEATHER_RSS_URL);
+  int code = http.GET();
+  Serial.printf("Weather RSS HTTP code: %d\n", code);
+  if (code != 200) {
+    http.end();
+    return;
+  }
+  // Download the RSS feed ONCE
+  String xml = http.getString();
+  http.end();
+  // Reset forecast data
+  fc6hrTitle = "";
+  fc6hrSummary = "";
+  fc12hrTitle = "";
+  fc12hrSummary = "";
+  // Reset alert data
+  alertTitle = "";
+  alertImpact = "";
+  alertConfidence = "";
+  alertActive = false;
+  int pos = 0;
+  int forecastFound = 0;
+  // Process every <entry> in the RSS feed
+  while (true) {
+    int start = xml.indexOf("<entry>", pos);
+    if (start == -1)
+      break;
+    int end = xml.indexOf("</entry>", start);
+    if (end == -1)
+      break;
+    String entry = xml.substring(start, end);
+    pos = end + 8;   // move to next entry
+    // CURRENT CONDITIONS
+    String entryTitle = extractXmlValue(entry, "title");
+    if (entryTitle.startsWith("Current Conditions")) {
+      // Updated timestamp
+      ccUpdated = extractXmlValue(entry, "updated");
+      // Summary CDATA
+      String summary = extractXmlValue(entry, "summary");
+      summary.replace("<![CDATA[", "");
+      summary.replace("]]>", "");
+      summary.replace("<br/>", "\n");
+      summary.replace("<br />", "\n");
+      summary.replace("<b>", "");
+      summary.replace("</b>", "");
+      summary.replace("&deg;C", "");
+      summary.trim();
+
+      // Parse labeled values
+      ccObservedAt = formatObservedTime( extractLabeledValue(summary, "Observed at:"));
+      ccCondition = extractLabeledValue(summary, "Condition:");
+      ccTemperature = extractLabeledValue(summary, "Temperature:");
+      ccPressure = extractLabeledValue(summary, "Pressure / Tendency:");
+      ccPressure.trim();
+      if (ccPressure.isEmpty()) {
+        ccPressure = extractLabeledValue(summary, "Pressure:");
+        ccPressure.trim(); }
+      ccVisibility = extractLabeledValue(summary, "Visibility:");
+      ccHumidity = extractLabeledValue(summary, "Humidity:");
+      ccDewpoint = extractLabeledValue(summary, "Dewpoint:");
+      ccWindChill = extractLabeledValue(summary, "Wind Chill:");
+      ccWind = extractLabeledValue(summary, "Wind:");
+      ccGust = extractLabeledValue(summary, "Gust:");
+      ccAQHI = extractLabeledValue(summary, "Air Quality Health Index:");
+      ccAQHI.trim();
+      if (ccAQHI == "10+") {
+        aqhiValue = 11;   // represent 10+ internally as 11
+      }
+      else if (ccAQHI.length() == 0 ||
+               ccAQHI.equalsIgnoreCase("n/a")) {
+        aqhiValue = -1;   // unavailable
+      }
+      else {
+        aqhiValue = ccAQHI.toInt();
+      }
+      ccHumidex = extractLabeledValue(
+        summary, "Humidex:");
+      Serial.println("Parsed Current Conditions:");
+      Serial.println(ccObservedAt);
+      Serial.println(ccCondition);
+      Serial.println(ccTemperature);
+      Serial.println(ccHumidity);
+      Serial.println(ccAQHI);
+      Serial.println(ccHumidex);
+    }
+    // FORECASTS
+    if (entry.indexOf("Weather Forecasts") >= 0) {
+      String title = extractXmlValue(entry, "title");
+      String summary = extractXmlValue(entry, "summary");
+      // Clean HTML / CDATA
+      summary.replace("<![CDATA[", "");
+      summary.replace("]]>", "");
+      summary.replace("<br/>", "\n");
+      summary.replace("<br />", "\n");
+      summary.replace("<b>", "");
+      summary.replace("</b>", "");
+      summary.trim();
+
+      if (forecastFound == 0) {
+        fc6hrTitle = title;
+        fc6hrSummary = summary;
+        forecastFound++;
+      }
+      else if (forecastFound == 1) {
+        fc12hrTitle = title;
+        fc12hrSummary = summary;
+        forecastFound++;
+      }
+    }
+    // WEATHER ALERTS
+    if (entry.indexOf("Warnings and Watches") >= 0) {
+      String title = extractXmlValue(entry, "title");
+      alertImpact = extractXmlValue(entry, "impact");
+      alertConfidence = extractXmlValue(entry, "confidence");
+      alertTitle = title;
+      String t = alertTitle;
+      t.toLowerCase();
+      alertActive =
+        (t.indexOf("no alerts") == -1) &&
+        (t.indexOf("orange") >= 0 ||
+         t.indexOf("yellow") >= 0 ||
+         t.indexOf("red") >= 0 ||
+         t.indexOf("special") >= 0 ||
+         t.indexOf("air quality") >= 0);
+    }
+  }
+  // DEBUG OUTPUT
+  Serial.println();
+  Serial.println("========== WEATHER DATA ==========");
+  Serial.printf("Observed:    %s\n", ccObservedAt.c_str());
+  Serial.printf("Condition:   %s\n", ccCondition.c_str());
+  Serial.printf("Temperature: %s\n", ccTemperature.c_str());
+  Serial.printf("Humidity:    %s\n", ccHumidity.c_str());
+  Serial.printf("AQHI:        '%s'\n", ccAQHI.c_str());
+  Serial.printf("AQHI value:  %d\n", aqhiValue);
+  Serial.printf("Humidex:     %s\n", ccHumidex.c_str());
+  Serial.println();
+  Serial.println("========== FORECAST ==========");
+  Serial.printf("6hr title:   %s\n", fc6hrTitle.c_str());
+  Serial.printf("12hr title:  %s\n", fc12hrTitle.c_str());
+  Serial.println();
+  Serial.println("========== ALERT ==========");
+  Serial.printf("Alert title: '%s'\n", alertTitle.c_str());
+  Serial.printf("Impact:      '%s'\n", alertImpact.c_str());
+  Serial.printf("Confidence:  '%s'\n", alertConfidence.c_str());
+  Serial.printf("alertActive: %d\n", alertActive);
+  Serial.println("==============================");
+}
+/*
+// ===== Fetch and Parse Weather =====
+void fetchWeather() {
+  HTTPClient http;
+  http.begin(WEATHER_RSS_URL);
+
+  int code = http.GET();
+  Serial.printf("Weather RSS HTTP code: %d\n", code);
+
+  if (code == 200) {
+    String xml = http.getString();
+    fetchForecast24h(xml);
+
+
+    // Find correct <entry> with current conditions
+    int pos = 0;
+    while (true) {
+      int start = xml.indexOf("<entry>", pos);
+      if (start == -1) break;
+      int end   = xml.indexOf("</entry>", start);
+      if (end == -1) break;
+
+      String entry = xml.substring(start, end);
+
+      // Category for current conditions
+      String entryTitle = extractXmlValue(entry, "title");
+
+        // Select the "Current Conditions" entry
+        if (!entryTitle.startsWith("Current Conditions")) {
+          pos = end + 8;
+          continue;
+        }
+      // Extract updated timestamp
+      ccUpdated = extractXmlValue(entry, "updated");
+      // Extract summary CDATA
+      String summary = extractXmlValue(entry, "summary");
+      
+      summary.replace("<![CDATA[", "");
+      summary.replace("]]>", "");
+      summary.replace("<br/>", "\n");
+      summary.replace("<br />", "\n");
+      summary.replace("<b>", "");
+      summary.replace("</b>", "");
+      summary.replace("&deg;C", ""); // add C 
+      summary.trim();
+
+      // Parse labeled values
+      ccObservedAt = formatObservedTime(
+                 extractLabeledValue(summary, "Observed at:")
+               );
+
+      //ccObservedAt  = extractLabeledValue(summary, "Observed at:");
+      ccCondition   = extractLabeledValue(summary, "Condition:");
+      ccTemperature = extractLabeledValue(summary, "Temperature:");
+        ccPressure = extractLabeledValue(summary, "Pressure / Tendency:");
+        ccPressure.trim();
+            if (ccPressure.isEmpty()) {
+              ccPressure = extractLabeledValue(summary, "Pressure:");
+              ccPressure.trim();
+      }
+      ccVisibility  = extractLabeledValue(summary, "Visibility:");
+      ccHumidity    = extractLabeledValue(summary, "Humidity:");
+      ccDewpoint    = extractLabeledValue(summary, "Dewpoint:");
+      ccWindChill   = extractLabeledValue(summary, "Wind Chill:");
+      ccWind        = extractLabeledValue(summary, "Wind:");
+      ccGust        = extractLabeledValue(summary, "Gust:");
+      ccAQHI        = extractLabeledValue(summary, "Air Quality Health Index:");
+      ccAQHI.trim();
+      if (ccAQHI == "10+") {
+          aqhiValue = 11;          // represent 10+ internally as 11
+            }
+      else if (ccAQHI.length() == 0 || ccAQHI.equalsIgnoreCase("n/a")) {
+        aqhiValue = -1;          // unavailable
+          }
+        else {
+      aqhiValue = ccAQHI.toInt();
+          }
+      ccHumidex     = extractLabeledValue(summary, "Humidex:");
+
+      break;
+    }
+
+    Serial.println("Parsed Weather:");
+    Serial.println(ccObservedAt);
+    Serial.println(ccCondition);
+    Serial.println(ccTemperature);
+    Serial.println(ccHumidity);
+    Serial.println(ccAQHI);
+    Serial.println(ccHumidex);
+    Serial.print("AQHI = '");
+    Serial.print(ccAQHI);
+    Serial.println("'");
+  }
+
+  http.end();
+}
+void fetchForecast24h(const String &xml) {
+
+  fc6hrTitle = "";
+  fc6hrSummary = "";
+  fc12hrTitle = "";
+  fc12hrSummary = "";
+
+  int pos = 0;
+  int found = 0;
+
+  while (true) {
+    int start = xml.indexOf("<entry>", pos);
+    if (start == -1) break;
+
+    int end = xml.indexOf("</entry>", start);
+    if (end == -1) break;
+
+    String entry = xml.substring(start, end);
+    pos = end + 8;
+
+    // Only forecast entries
+    if (entry.indexOf("Weather Forecasts") == -1) continue;
+
+    String title   = extractXmlValue(entry, "title");
+    String summary = extractXmlValue(entry, "summary");
+
+    // Clean HTML / CDATA
+    summary.replace("<![CDATA[", "");
+    summary.replace("]]>", "");
+    summary.replace("<br/>", "\n");
+    summary.replace("<br />", "\n");
+    summary.replace("<b>", "");
+    summary.replace("</b>", "");
+    summary.trim();
+
+    if (found == 0) {
+      fc6hrTitle = title;
+      fc6hrSummary = summary;
+    } else if (found == 1) {
+      fc12hrTitle = title;
+      fc12hrSummary = summary;
+      break;  // we only need 24h
+    }
+
+    found++;
+  }
+}
+
+// ===== Fetch and Parse Alerts =====
+void fetchAlerts() {
+  HTTPClient http;
+  http.begin(ALERTS_RSS_URL);
+  int code = http.GET();
+  Serial.printf("Alerts RSS HTTP code: %d\n", code);
+
+  if (code == 200) {
+    String xml = http.getString();
+    // Parse first alert entry
+    int pos = 0;
+
+    Serial.printf("alertTitle: '%s'\n", alertTitle.c_str());
+    Serial.printf("alertActive: %d\n", alertActive);
+
+while (true) {
+
+  int start = xml.indexOf("<entry>", pos);
+  if (start == -1) break;
+
+  int end = xml.indexOf("</entry>", start);
+  if (end == -1) break;
+
+  String entry = xml.substring(start, end);
+
+  pos = end + 8;
+
+  // Ignore weather conditions and forecasts
+  if (entry.indexOf("Warnings and Watches") == -1) {
+  pos = end + 8;
+    continue;
+  }
+  
+  String title = extractXmlValue(entry, "title");
+  //String impact = extractXmlValue(entry, "impact");
+  //String confidence = extractXmlValue(entry, "confidence");
+  alertImpact = extractXmlValue(entry, "impact");
+  alertConfidence = extractXmlValue(entry, "confidence");
+
+  //title.replace("City of ", "");
+  //title.replace("city of ", "");
+  //title.trim();
+
+  //String summaryHtml = extractXmlValue(entry, "summary");
+
+  //summaryHtml.replace("<![CDATA[", "");
+  //summaryHtml.replace("]]>", "");
+  //summaryHtml.replace("<br/>", "\n");
+  //summaryHtml.replace("<br />", "\n");
+  //summaryHtml.replace("<b>", "");
+  //summaryHtml.replace("</b>", "");
+  //summaryHtml.trim();
+
+  alertTitle = title;
+  //alertSummary = summaryHtml;
+  String t = alertTitle;
+  t.toLowerCase();
+  alertActive =
+    (t.indexOf("no alerts") == -1) &&
+    (t.indexOf("orange") >= 0 ||
+     t.indexOf("yellow") >= 0 ||
+     t.indexOf("red") >= 0 ||
+     t.indexOf("special") >= 0 ||
+     t.indexOf("air quality") >= 0);
+
+  break;
+}
+    Serial.printf("Alert title: '%s'\n", alertTitle.c_str());
+    Serial.printf("alertActive=%d alertJustAppeared=%d\n",alertActive, alertJustAppeared);
+    Serial.println("Parsed Alert:");
+    Serial.println(alertTitle);
+    //Serial.println(alertSummary);
+  }
+  http.end();
+}
+*/
+void getAuroraData() {
+  Serial.println("Fetching Aurora Data...");
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi not connected.");
+    return;
+  }
+
+  WiFiClientSecure client;
+  client.setInsecure();   // Required for HTTPS
+
+  HTTPClient http;
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  http.begin(client, auroraURL);
+
+  int httpCode = http.GET();
+  Serial.print("HTTP Code: ");
+  Serial.println(httpCode);
+
+  if (httpCode == 200) {
+    String payload = http.getString();
+    payload.trim();   // remove newline
+    Serial.print("Raw Payload: [");
+    Serial.print(payload);
+    Serial.println("]");
+    auroraValue = payload.toInt();
+    auroraValid = true;
+    Serial.print("Parsed Aurora Value: ");
+    Serial.println(auroraValue);
+  }
+  else {
+    Serial.println("Failed to fetch aurora data.");
+    auroraValid = false;
+  }
+
+  http.end();
+}
+
+void drawAuroraBar(int value) {
+  uint16_t barColor;
+  if (value >= 80)
+    barColor = TFT_RED;
+  else if (value > 65)
+    barColor = TFT_YELLOW;
+  else if (value > 50)
+    barColor = TFT_GREENYELLOW;
+  else
+    barColor = TFT_WHITE;
+  // Clear only bar region
+  //tft.fillRect(BAR_X, BAR_Y, BAR_WIDTH, BAR_HEIGHT + 12, TFT_BLACK);
+  // Outline
+  tft.drawRect(BAR_X, BAR_Y, BAR_WIDTH, BAR_HEIGHT, TFT_DARKGREY);
+  int fillWidth = map(value, 0, 100, 0, BAR_WIDTH);
+  if (fillWidth > 0)
+    tft.fillRect(BAR_X + 1, BAR_Y + 1,
+                 fillWidth - 2, BAR_HEIGHT - 2,
+                 barColor);
+  // Tick marks
+  for (int i = 0; i <= 4; i++) {
+    int tickX = BAR_X + (i * BAR_WIDTH / 4);
+    tft.drawLine(tickX, BAR_Y + BAR_HEIGHT,
+                 tickX, BAR_Y + BAR_HEIGHT + 5,
+                 TFT_LIGHTGREY);
+  }
+  tft.setTextSize(1);
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.setCursor(BAR_X - 2, BAR_Y + BAR_HEIGHT + 6);
+  tft.print("0");
+  tft.setCursor(BAR_X + BAR_WIDTH/2 - 6, BAR_Y + BAR_HEIGHT + 6);
+  tft.print("50");
+  tft.setCursor(BAR_X + BAR_WIDTH - 18, BAR_Y + BAR_HEIGHT + 6);
+  tft.print("100");
+}
+
+void drawAlertIndicator() { // Dot- Triangle
+  uint16_t color;
+  if (alertActive) {
+    color = alertColorFor(alertTitle);
+  } else {
+    color = TFT_BLACK; // no alert
+  }
+  // Handle blinking
+  if (alertActive) {
+    unsigned long now = millis();
+
+    if (now - lastBlinkTime > BLINK_INTERVAL) {
+      blinkState = !blinkState;
+      lastBlinkTime = now;
+    }
+  } else {
+    blinkState = true; // always visible when no alert
+  }
+// Draw + erase TRIANGLE
+if (blinkState) {
+  tft.fillTriangle(
+    ALERT_DOT_X, ALERT_DOT_Y - ALERT_DOT_R,   // top
+    ALERT_DOT_X - ALERT_DOT_R, ALERT_DOT_Y + ALERT_DOT_R, // bottom-left
+    ALERT_DOT_X + ALERT_DOT_R, ALERT_DOT_Y + ALERT_DOT_R, // bottom-right
+    color);
+} else {
+  tft.fillTriangle(
+    ALERT_DOT_X, ALERT_DOT_Y - ALERT_DOT_R,
+    ALERT_DOT_X - ALERT_DOT_R, ALERT_DOT_Y + ALERT_DOT_R,
+    ALERT_DOT_X + ALERT_DOT_R, ALERT_DOT_Y + ALERT_DOT_R,
+    TFT_BLACK);
+  }
+  /*
+  // Draw + erase DOT
+  if (blinkState) {
+    tft.fillCircle(ALERT_DOT_X, ALERT_DOT_Y, ALERT_DOT_R, color);
+    //tft.drawCircle(ALERT_DOT_X, ALERT_DOT_Y, ALERT_DOT_R, TFT_DARKGREY);
+  } else {
+    tft.fillCircle(ALERT_DOT_X, ALERT_DOT_Y, ALERT_DOT_R, TFT_BLACK);
+    //tft.drawCircle(ALERT_DOT_X, ALERT_DOT_Y, ALERT_DOT_R, TFT_GREEN);
+  }
+  */
+}
+
+void drawAQHIIndicator() {
+  uint16_t color = TFT_DARKGREY;   // Default = no AQHI data
+  if (aqhiValue > 0) {
+    int index = (aqhiValue >= 10) ? 10 : aqhiValue - 1;
+    color = aqhiColours[index];
+  }
+  tft.fillRoundRect(AQHI_BOX_X, AQHI_BOX_Y, AQHI_BOX_W, AQHI_BOX_H, 2, color);
+  tft.drawRoundRect(AQHI_BOX_X, AQHI_BOX_Y, AQHI_BOX_W, AQHI_BOX_H, 2, TFT_BLUE);
+}
+
+char weatherIconFromCondition(const String &cond) {
+  String c = cond;
+  c.toLowerCase();
+
+  tft.setTextColor(TFT_GOLD, TFT_BLACK);
+  if (c.indexOf("mainly sunny") >= 0) return 'C'; // sun/cloud
+
+  tft.setTextColor(TFT_GOLD, TFT_BLACK);
+  if (c.indexOf("sunny") >= 0) return 'N'; // sun
+
+   tft.setTextColor(TFT_SILVER, TFT_BLACK);
+  if (c.indexOf("mainly clear") >= 0) return 'G'; // moon/cloud
+
+  tft.setTextColor(TFT_SILVER, TFT_BLACK);
+  if (c.indexOf("clear") >= 0) return 'I'; // moon
+
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  if (c.indexOf("partly cloudy") >= 0) return 'P'; // single cloud
+
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  if (c.indexOf("mostly cloudy") >= 0) return 'P'; // single cloud
+
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  if (c.indexOf("cloudy") >= 0) return 'O'; // overcast - double cloud
+
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  if (c.indexOf("fog patches") >= 0 || c.indexOf("fog") >= 0 || c.indexOf("mist") >= 0 ||c.indexOf("smoke") >= 0 || c.indexOf("dust") >= 0 ) return 'F'; // fog cloud
+
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  if (c.indexOf("heavy snow") >= 0) return 'D'; // snow flake 
+
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  if (c.indexOf("light snow") >= 0 || c.indexOf("snow pellets") >= 0 || c.indexOf("snow grains") >= 0 ) return 'L'; // snow cloud
+
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  if (c.indexOf("snow") >= 0) return 'L'; // snow cloud
+
+   tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  if (c.indexOf("ice crystals") >= 0 || c.indexOf("light freezing drizzle") >= 0 || c.indexOf("freezing drizzle") >= 0 ) return 'L'; // snow cloud
+
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  if (c.indexOf("ice pellets") >= 0) return 'L'; // snow cloud
+
+  tft.setTextColor(TFT_RED, TFT_BLACK);
+  if (c.indexOf("thunderstorm") >= 0)  return 'K';
+
+  tft.setTextColor(TFT_SKYBLUE, TFT_BLACK);
+  if (c.indexOf("heavy rain") >= 0) return 'B'; // rain
+
+  tft.setTextColor(TFT_SKYBLUE, TFT_BLACK);
+  if (c.indexOf("light rain") >= 0|| c.indexOf("drizzle") >= 0 ) return 'M'; // rain cloud
+
+  tft.setTextColor(TFT_SKYBLUE, TFT_BLACK);
+  if (c.indexOf("rain") >= 0) return 'M'; // rain cloud
+  
+    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+      return 'J'; // unknown umbrella
+}
+
+String formatObservedTime(String raw) {
+  raw.replace("Observed at:", "");
+  raw.trim();
+
+  const char* days[] = {
+    " Monday", " Tuesday", " Wednesday",
+    " Thursday", " Friday", " Saturday", " Sunday"
+  };
+
+  for (int i = 0; i < 7; i++) {
+    int idx = raw.indexOf(days[i]);
+    if (idx > 0) {
+      raw = raw.substring(0, idx);
+      break;
+    }
+  }
+
+  raw.replace("Calgary Int'l Airport", "Calgary");
+  raw.replace(" AM", "AM");  // <-- remove space before AM
+  raw.replace(" PM", "PM");  // <-- remove space before PM
+  raw.trim();
+
+  return raw;
+}
+
+void drawWordWrappedText(int x, int y, int maxWidth, const String &text) {
+  int cursorX = x;
+  int cursorY = y;
+  int lineHeight = tft.fontHeight();
+  int spaceWidth = tft.textWidth(" ");
+  tft.setCursor(cursorX, cursorY);
+  int i = 0;
+  while (i < text.length()) {
+    // Explicit newline
+    if (text[i] == '\n') {
+      cursorX = x;
+      cursorY += lineHeight;
+      tft.setCursor(cursorX, cursorY);
+      i++;
+      continue;
+    }
+    // Extract next word
+    int start = i;
+    while (i < text.length() && text[i] != ' ' && text[i] != '\n') i++;
+    String word = text.substring(start, i);
+    int wordWidth = tft.textWidth(word);
+    // Wrap if needed
+    if (cursorX != x && cursorX + wordWidth > x + maxWidth) {
+      cursorX = x;
+      cursorY += lineHeight;
+      tft.setCursor(cursorX, cursorY);
+    }
+    // Draw word
+    tft.print(word);
+    cursorX += wordWidth;
+
+    // Handle space AFTER word
+    if (i < text.length() && text[i] == ' ') {
+      // Only draw space if it fits on this line
+      if (cursorX + spaceWidth <= x + maxWidth) {
+        tft.print(" ");
+        cursorX += spaceWidth;
+      } else {
+        cursorX = x;
+        cursorY += lineHeight;
+        tft.setCursor(cursorX, cursorY);
+      }
+      i++;  // consume space
+    }
+  }
+}
+
+void updateSecondsBar(int sec) {
+
+  // First time or page entry → draw full correct state
+  if (lastBarSec == -1) {
+    for (int i = 0; i < totalSegments; i++) {
+      int x = barStartX + i * (segWidth + segGap);
+
+    if (i <= sec) {
+      uint16_t color = (i % 10 == 0) ? TFT_ORANGE : TFT_GREEN;
+      tft.fillRect(x, barY, segWidth, segHeight, color);
+    } else {
+        tft.fillRect(x, barY, segWidth, segHeight, TFT_DARKCYAN);
+      }
+    }
+
+    lastBarSec = sec;
+    return;
+  }
+
+  // No change → do nothing
+  if (sec == lastBarSec) return;
+
+  int x;
+
+  // New minute → clear all
+  if (sec == 0) {
+    for (int i = 0; i < totalSegments; i++) {
+      x = barStartX + i * (segWidth + segGap);
+      tft.fillRect(x, barY, segWidth, segHeight, TFT_DARKCYAN);
+    }
+  } else {
+    // Only draw the new segment
+    x = barStartX + sec * (segWidth + segGap);
+    uint16_t color = (sec % 10 == 0) ? TFT_ORANGE : TFT_GREEN;
+    tft.fillRect(x, barY, segWidth, segHeight, color);
+  }
+
+  lastBarSec = sec;
+}
+
+///////// ===== Display Functions =====
+void drawPageOne() {
+  tft.setTextSize(2);
+  tft.setTextColor(TFT_GREEN);
+  drawWordWrappedText(0, 0, tft.width(), ccObservedAt);
+  tft.println("\n");
+ 
+  if (ccTemperature.length()) {
+    tft.setTextSize(6);
+    tft.setTextColor(TFT_WHITE);
+    tft.setCursor(0, 24); // 0, 66 // 0, 64
+    tft.printf("%s", ccTemperature.c_str());
+  }
+  if (ccCondition.length()) {
+    tft.setTextSize(3);
+    tft.setTextColor(TFT_CYAN);
+    drawWordWrappedText(0, 72, tft.width(), ccCondition); // 0,20
+    //tft.printf("%s\n", ccCondition.c_str());
+  }
+   
+  // ---- WEATHER ICON (DRAW LAST) ----
+ char icon = weatherIconFromCondition(ccCondition);
+  tft.loadFont(weatherfont60);
+  //tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setCursor(188, 24);  // 188, 66
+  tft.print(icon);
+  tft.unloadFont();
+}
+
+ void drawPageTwo(){
+  tft.setTextSize(1);
+  tft.setTextColor(TFT_WHITE);
+  tft.setCursor(0, 0);
+  tft.printf("Humidity:\n");
+  if (ccHumidity.length()) {
+    tft.setTextSize(3);
+    tft.setTextColor(TFT_WHITE);
+    //tft.setCursor(0, 50);
+    tft.printf("     %s\n", ccHumidity.c_str());
+  }
+  tft.setTextSize(1);
+tft.printf("Visibility:\n");
+  if (ccVisibility.length()) {
+    tft.setTextSize(3);
+    tft.printf("     %s\n", ccVisibility.c_str());
+  }
+    tft.setTextSize(1);
+tft.printf("Dewpoint:\n");
+  if (ccDewpoint.length()) {
+    tft.setTextSize(3);
+    tft.printf("     %s C\n", ccDewpoint.c_str());
+  }
+tft.setTextSize(1);
+
+if (ccWindChill.length()) {  // windchill data is only present when temp is below zero
+    tft.setTextColor(TFT_SKYBLUE);
+    tft.printf("Windchill:\n\n");
+    tft.setTextSize(3);
+    tft.printf("  %s C", ccWindChill.c_str());
+
+} else if (ccHumidex.length()) {  // Humidex data is only present when ambient temp above 19 and humidty is high
+    tft.setTextColor(TFT_MAGENTA);
+    tft.printf("Humidex:\n\n");
+    tft.setTextSize(3);
+    tft.printf("  %s C", ccHumidex.c_str());
+
+} else {
+    tft.setTextColor(TFT_DARKGREY);
+    tft.printf("Windchill / Humidex:\n\n");
+    tft.setTextSize(2);
+    tft.printf("    n/a");
+}
+
+  //Current Time shown bottom right corner
+   struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    tft.drawString("Error", 196, 124, 1);
+    return;
+  }
+  char hourMin[6];
+  char seconds[4];
+  char ampm[3];
+  //strftime(hourMin, sizeof(hourMin), "%H:%M", &timeinfo); // 24hr clock - hours:minutes
+  //strftime(hourMin, sizeof(hourMin), "%I:%M", &timeinfo); // 12hr clock with leading zero - hours:minutes 
+  strftime(hourMin, sizeof(hourMin), "%l:%M", &timeinfo); // 12hr clock no leading zero - hours:minutes 
+  tft.setTextSize(3);
+  tft.setTextColor(TFT_GREENYELLOW);
+  tft.fillRoundRect(146, 110, 100, 25, 10, TFT_BLUE);  //150, 110, 94, 30
+  tft.drawString(hourMin, 196, 124); // time  206, 128
+}
+
+  void drawPageThree(){
+
+    if (ccWind.length()) {
+    tft.setTextSize(2);
+    tft.setCursor(0, 0);  // 0,66 
+    tft.setTextColor(TFT_SKYBLUE);
+    tft.printf("Wind Velocity:");
+    tft.setTextSize(3);
+    drawWordWrappedText(20, 16, tft.width(), ccWind);
+    //tft.printf("%s\n", ccWind.c_str());
+  }
+
+  if (ccPressure.length()) {
+    tft.setTextSize(2);
+    tft.setTextColor(TFT_WHITE);
+    tft.setCursor(0, 70);
+    tft.printf("Barometric Press:\n");
+    tft.setTextSize(3);
+    tft.setTextColor(TFT_WHITE);
+    drawWordWrappedText(10, 86, tft.width(), ccPressure);
+    //tft.printf("    %s\n", ccPressure.c_str());
+  }
+  //Current Time shown bottom right corner
+   struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    tft.drawString("Error", 196, 124, 1);
+    return;
+  }
+  char hourMin[6];
+  char seconds[4];
+  char ampm[3];
+  //strftime(hourMin, sizeof(hourMin), "%H:%M", &timeinfo); // 24hr clock - hours:minutes
+  //strftime(hourMin, sizeof(hourMin), "%I:%M", &timeinfo); // 12hr clock with leading zero - hours:minutes 
+  strftime(hourMin, sizeof(hourMin), "%l:%M", &timeinfo); // 12hr clock no leading zero - hours:minutes 
+  tft.setTextSize(3);
+  tft.setTextColor(TFT_GREENYELLOW);
+  tft.fillRoundRect(146, 110, 100, 25, 10, TFT_BLUE);  //150, 110, 94, 30
+  tft.drawString(hourMin, 196, 124); // time  206, 128
+
+}
+
+void drawPageFour(){
+  tft.setTextSize(3);
+  tft.setTextColor(TFT_WHITE);
+  drawWordWrappedText(0, 0, tft.width(), fc6hrTitle);  //fc6hrSummary
+  //drawWordWrappedText(0, 0, tft.width(), fc6hrSummary);
+  //drawWordWrappedText(0, 35 - forecastScroll, tft.width(), fc6hrSummary);
+}
+
+void drawPageFive(){
+  tft.setTextSize(3);
+  tft.setTextColor(TFT_WHITE);
+  drawWordWrappedText(0, 0, tft.width(), fc12hrTitle);  //fc12hrSummary
+  //drawWordWrappedText(0, 0, tft.width(), fc12hrSummary);
+}
+
+void drawAqhiPage(){
+  tft.setTextSize(2);
+  tft.setTextColor(TFT_WHITE);
+  tft.setCursor(0, 0);
+if (ccAQHI.length()) {
+  if (aqhiValue < 0) { ////
+    tft.printf("Air Quality\n");
+    tft.printf("Health Index:\n\n");
+    tft.fillRoundRect(154, 6, 70, 40, 4, TFT_DARKGREY);
+    tft.drawRoundRect(154, 6, 70, 40, 4, TFT_LIGHTGREY);
+    tft.setTextColor(TFT_BLACK);
+    tft.setTextSize(2);
+    tft.drawCentreString("N/A", 186, 18, 1);
+    // Draw all segments greyed out
+    int x = 10;
+    int y = 55;
+    for (int i = 0; i < 11; i++) {
+        tft.fillRoundRect(x, y, 18, 18, 3, TFT_DARKGREY);
+        tft.setTextColor(TFT_WHITE);
+        tft.setTextSize(1);
+        if (i == 9) {
+            tft.setCursor(x + 2, y + 22);
+            tft.print("10+");
+        } else {
+            tft.setCursor(x + 6, y + 22);
+            tft.print(i + 1);
+        }
+        x += 20;
+    }
+    tft.setTextColor(TFT_LIGHTGREY);
+    tft.setTextSize(2);
+    tft.setCursor(65, 105);
+    tft.print("not available");
+    return;
+}  ////
+tft.printf("Air Quality\n");
+tft.printf("Health Index: \n\n");
+int displayAQHI = constrain(aqhiValue, 1, 11);
+uint16_t boxColour = aqhiColours[displayAQHI - 1];
+tft.fillRoundRect(154, 6, 70, 40, 4, boxColour); // level coloured border around aqhi text
+tft.fillRoundRect(164, 12, 50, 28, 6, TFT_BLACK); //black box for aqhi text
+tft.drawRoundRect(154, 6, 70, 40, 4, TFT_BLUE);
+ 
+String aqhiText;
+    if (aqhiValue >= 11)
+        aqhiText = "10+";
+    else
+        aqhiText = String(aqhiValue);
+tft.setTextColor(TFT_WHITE);  // aqhi in box #
+tft.setTextSize(3);  //4
+tft.drawCentreString(aqhiText, 192, 16, 1); // aqhiText, 190, 12, 1 //  186,12,1
+  
+    // Draw the coloured squares
+    int x = 10;
+    int y = 55;
+  for (int i = 0; i < 11; i++) {
+    uint16_t colour = aqhiColours[i];
+    bool active;
+    if (i < 10)
+        active = (i + 1) <= aqhiValue;
+    else
+        active = (aqhiValue >= 11);   // Last box is 10+
+    if (!active)
+        colour = TFT_DARKGREY;
+    tft.fillRoundRect(x, y, 18, 18, 3, colour);
+    tft.setTextColor(TFT_WHITE);
+    tft.setTextSize(1);
+    if (i == 10) {
+      // 10+ label
+      tft.setCursor(x + 1, y + 22);
+      tft.print("10+");
+      }
+      else if (i == 9) {
+          // 10 label
+          tft.setCursor(x + 3, y + 22);   // Adjust this value to suit
+          tft.print("10");
+      }
+      else {
+          // 1–9 labels
+          tft.setCursor(x + 6, y + 22);
+          tft.print(i + 1);
+      }
+    x += 19;
+}
+    // Risk category
+    tft.setTextSize(2);
+    //tft.setCursor(36, 105); // 20,105
+    if (aqhiValue <= 1) {  // <= 1
+        tft.setCursor(70, 94);
+        tft.setTextColor(TFT_BLUE);
+        tft.fillRoundRect(64, 88, 106, 26, 3, 0x051F); //SKY  //60, 98, 120, 26, 3, TFT_SKYBLUE // SKY
+        tft.print("LOW RISK");
+    }
+    else if (aqhiValue <= 3) {  // <= 3
+        tft.setCursor(68, 94);
+        tft.setTextColor(0x051F); // SKY
+        tft.print("LOW RISK");
+    }
+    else if (aqhiValue <= 6) {  // <= 6
+        tft.setCursor(38, 94);
+        tft.setTextColor(TFT_YELLOW);
+        tft.print("MODERATE RISK");
+    }
+    else if (aqhiValue <= 9) {  //  <= 9
+        tft.setCursor(64, 94);
+        tft.setTextColor(TFT_YELLOW);
+        tft.fillRoundRect(60, 88, 120, 26, 3, TFT_RED);
+        tft.print("HIGH RISK");
+    }
+    else {
+        tft.setCursor(32, 94);
+        tft.setTextColor(TFT_YELLOW);
+        tft.fillRoundRect(26, 88, 178, 26, 3, TFT_PURPLE);
+        tft.print("VERY HIGH RISK");
+    }
+  }
+}
+
+void drawAuroraPage() {
+  tft.setTextSize(2);
+  tft.setCursor(0, 0);
+  tft.setTextColor(TFT_WHITE);
+  tft.printf("Aurora borealis:\n\n ");
+
+  if (!auroraValid) {
+    tft.setTextColor(TFT_WHITE);
+    tft.print("No Aurora Data");
+    return;
+  }
+
+  uint16_t textColor;
+  if (auroraValue >= 80)
+    textColor = TFT_RED;
+  else if (auroraValue > 65)
+    textColor = TFT_YELLOW;
+  else if (auroraValue > 50)
+    textColor = TFT_GREENYELLOW;
+  else
+    textColor = TFT_WHITE;
+
+  tft.setTextColor(textColor, TFT_BLACK);
+  tft.setTextSize(4);
+  tft.printf("   %d%%", auroraValue);
+  // Draw bar
+  drawAuroraBar(auroraValue);
+
+  //Current Time shown bottom right corner
+   struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    tft.drawString("Error", 196, 124, 1);  //tft.drawString("Time Error", 10, 10, 2);
+    return;
+  }
+  char hourMin[6];
+  char seconds[4];
+  char ampm[3];
+  //strftime(hourMin, sizeof(hourMin), "%H:%M", &timeinfo); // 24hr clock - hours:minutes
+  //strftime(hourMin, sizeof(hourMin), "%I:%M", &timeinfo); // 12hr clock with leading zero - hours:minutes 
+  strftime(hourMin, sizeof(hourMin), "%l:%M", &timeinfo); // 12hr clock no leading zero - hours:minutes 
+  tft.setTextSize(3);
+  tft.setTextColor(TFT_GREENYELLOW);
+  tft.fillRoundRect(146, 110, 100, 25, 10, TFT_BLUE);
+  tft.drawString(hourMin, 196, 124); // time  206, 128
+}
+
+void drawAlertPage() {
+  tft.setTextSize(3); // (3)
+  uint16_t c = alertColorFor(alertTitle);
+  tft.setTextColor(c);
+  drawWordWrappedText(0, 0, tft.width(), alertTitle);
+
+  tft.setCursor(0, 102); // x= left/right  y= up/down
+tft.setTextSize(2);
+
+// Only show Impact if it exists
+if (alertImpact.length() > 0) {
+    tft.printf("IL: %s\n", alertImpact.c_str());
+}
+// Only show Confidence if it exists
+if (alertConfidence.length() > 0) {
+    tft.printf("FC: %s\n", alertConfidence.c_str());
+}
+  //tft.setCursor(0, 102); // x= left/right  y= up/dwn
+  //tft.setTextSize(2);
+  //tft.printf("Impt:%s\n", alertImpact==""?" - -":alertImpact.c_str());
+  //tft.printf("Cfdc:%s\n", alertConfidence==""?" - -":alertConfidence.c_str());
+/*
+  //Current Time shown bottom right corner
+   struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    tft.drawString("Error", 196, 124, 1); //tft.drawString("Time Error", 10, 10, 2);
+    return;
+  }
+  char hourMin[6];
+  char seconds[4];
+  char ampm[3];
+  //strftime(hourMin, sizeof(hourMin), "%H:%M", &timeinfo); // 24hr clock - hours:minutes
+  //strftime(hourMin, sizeof(hourMin), "%I:%M", &timeinfo); // 12hr clock with leading zero - hours:minutes 
+  strftime(hourMin, sizeof(hourMin), "%l:%M", &timeinfo); // 12hr clock no leading zero - hours:minutes 
+  tft.setTextSize(3);
+  tft.setTextColor(TFT_GREENYELLOW);
+  tft.fillRoundRect(146, 110, 100, 25, 10, TFT_BLUE);
+  tft.drawString(hourMin, 196, 124); // time  206, 128
+  */
+}
+
+void enterClockPage() {
+  tft.fillScreen(TFT_BLACK);
+  lastBarSec = -1;  // force redraw
+  // draw empty bar
+  for (int i = 0; i < totalSegments; i++) {
+    int x = barStartX + i * (segWidth + segGap);
+    tft.fillRect(x, barY, segWidth, segHeight, TFT_DARKCYAN);
+  }
+}
+
+void drawClockPage() {
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    tft.drawString("Time Error", 10, 10, 2);
+    return;
+  }
+  char hourMin[6];
+  char seconds[4];
+  char dateStr[20];
+  char tzStr[5];
+  char ampm[3];
+  //strftime(hourMin, sizeof(hourMin), "%H:%M", &timeinfo); // 24hr clock - hours:minutes
+  //strftime(hourMin, sizeof(hourMin), "%I:%M", &timeinfo); // 12hr clock with leading zero - hours:minutes 
+  strftime(hourMin, sizeof(hourMin), "%l:%M", &timeinfo);   // 12hr clock no leading zero - hours:minutes 
+  strftime(seconds, sizeof(seconds), ":%S", &timeinfo); // seconds - shown on seconds bar
+  //strftime(dateStr, sizeof(dateStr), "%a %b %d", &timeinfo); // short date - day / month / date
+  strftime(dateStr, sizeof(dateStr), "%a %d %b", &timeinfo); // short date - day / date / month
+  strftime(tzStr, sizeof(tzStr), "%Z", &timeinfo);  // timezone  (small z shows utc offset)
+  strftime(ampm, sizeof(ampm), "%p", &timeinfo); // am/pm
+  // ===== TIME (unchanged) =====
+  tft.setTextDatum(MC_DATUM);
+  tft.fillRoundRect(0, 0, 270, 67, 30, TFT_BLUE); // tft.fillRoundRect(0, 0, 270, 67, 30, TFT_DARKCYAN); //TFT_TRANSPARENT
+  tft.setTextSize(7);
+  tft.setTextColor(TFT_GREEN);
+  tft.drawString(hourMin, 120, 36); // time
+  tft.setTextSize(2);
+  tft.setTextColor(TFT_LIGHTGREY);
+  tft.drawString(tzStr, 120, 60); // timezone shown below colon
+  tft.setTextSize(2);
+  tft.setTextColor(TFT_WHITE);
+  tft.drawString(ampm, 120, 8); // am/pm shown above colon
+  // ===== DATE =====
+  //tft.fillRect(0, 95, 270, 44, TFT_TRANSPARENT);
+  tft.fillRect(0, 94, 270, 4, TFT_DARKGREEN); // changed this to five stripes behind date
+  tft.fillRect(0, 102, 270, 4, TFT_DARKGREEN);
+  tft.fillRect(0, 110, 270, 4, TFT_DARKGREEN);
+  tft.fillRect(0, 118, 270, 4, TFT_DARKGREEN);
+  tft.fillRect(0, 126, 270, 4, TFT_DARKGREEN);
+  tft.setTextSize(4);
+  tft.setTextColor(TFT_WHITE);
+  tft.drawString(dateStr, 120, 114); // 120,110 , 116
+
+  // ===== ADD THIS LINE (seconds bar) =====
+  updateSecondsBar(timeinfo.tm_sec);
+  //delay(200);
+}
+
+  uint16_t alertColorFor(const String &title) {
+  String t = title;
+  t.toLowerCase();
+  if (t.indexOf("ended") >= 0)  return TFT_GREEN;
+  if (t.indexOf("red") >= 0)    return TFT_RED;
+  if (t.indexOf("orange") >= 0) return TFT_ORANGE;
+  if (t.indexOf("yellow") >= 0) return TFT_YELLOW;
+  if (t.indexOf("special") >= 0) return TFT_MAGENTA;   //  TFT_DARKCYAN;   // 
+  return TFT_LIGHTGREY; /// TFT_DARKGREY
+}
+
+// ===== XML Helpers =====
+String extractXmlValue(const String &xml, const String &tag) {
+  String open  = "<" + tag;
+  int idx = xml.indexOf(open);
+  if (idx == -1) return "";
+  idx = xml.indexOf(">", idx);
+  if (idx == -1) return "";
+  idx++;
+  int end = xml.indexOf("</" + tag + ">", idx);
+  if (end == -1) return "";
+  return xml.substring(idx, end);
+}
+
+String extractLabeledValue(const String &src, const String &label) {
+  int start = src.indexOf(label);
+  if (start == -1) return "";
+  start += label.length();
+  int end = src.indexOf('\n', start);
+  if (end == -1) end = src.length();
+  String val = src.substring(start, end);
+  val.trim();
+  return val;
+}
