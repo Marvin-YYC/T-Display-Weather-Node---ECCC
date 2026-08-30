@@ -4,7 +4,7 @@
 // includes: Clock page + clock insert - AQHI Scale and Indicator - Aurora Watch data - two day forecast - colour coded Weather Alert Indicator - deep sleep
 // Updated and streamlined weather data fetch
 //ALL NEW This works, using public data source not from NavCan weather station
-// Aug 12/26
+// Aug 30/26
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <TFT_eSPI.h>
@@ -28,6 +28,7 @@ const int pwmChannel = 0;
 #define BAR_HEIGHT  18
 #define BAR_X       20
 #define BAR_Y       70
+int lastDisplayedAuroraValue = -1;
 
 bool alertActive = false;
 bool alertJustAppeared = false;
@@ -49,8 +50,9 @@ const unsigned long BLINK_INTERVAL = 150; // 250 / 500 ms
 
 //Fetch Schedule
 bool weatherStartupFetchDone = false;
-bool auroraStartupFetchDone = false;
 int lastWeatherFetchMinute = -1;
+bool auroraStartupFetchDone = false;
+int lastAuroraFetchHour = -1;
 int lastAuroraFetchMinute = -1;
 
 // ===== Seconds bar =====
@@ -102,26 +104,10 @@ const char* PASSWORD = "YOUR_SSID_PASSWORD";   // YOUR_SSID_PASSWORD >>>>>>>>>>>
 //===== Weather Data ======
 const char* WEATHER_RSS_URL  = "https://weather.gc.ca/rss/weather/51.046_-114.057_e.xml"; // Calgary 
 //const char* WEATHER_RSS_URL  = "https://weather.gc.ca/rss/weather/47.384_-61.867_e.xml";  //Cap-aux-Meules
-
 //const char* WEATHER_RSS_URL  = "https://weather.gc.ca/rss/weather/53.536_-113.494_e.xml";  // Edmonton 
-
-//===== Alert Data =========
-//const char* ALERTS_RSS_URL   = "https://weather.gc.ca/rss/weather/51.046_-114.057_e.xml";   // Calgary  
-//<<your must use the url that indicates "battleboard" - -  alerts may not work correctly otherwise>>
-
-//const char* ALERTS_RSS_URL   = "https://weather.gc.ca/rss/battleboard/mbrm177_e.xml"; // test
-//const char* ALERTS_RSS_URL   = "https://weather.gc.ca/rss/battleboard/bcrm28_e.xml"; // test 
 
 //====== Aurora Watch Data ===========
 const char* auroraURL = "https://www.aurorawatch.ca/AWVal.txt";   // NOTE: THIS WEBSITE ONLY UPDATES ONCE PER HOUR AT :11 MINUTES PAST THE HOUR.
-
-// ===== Update intervals (ms) =====
-//const unsigned long WEATHER_INTERVAL = 600000UL; // update 15 minutes 900000UL // update 10 minutes 600000UL  // 660000 11 min
-//const unsigned long ALERTS_INTERVAL  = 660000UL; //  900000UL 15min // update 20 minutes 1200000UL  // 5 min for test 300000UL
-//const unsigned long AURORA_INTERVAL = 1800000UL; // update 60 minutes 3600000UL  // update 30 minutes 1800000UL
-//unsigned long lastWeatherUpdate = 0;
-//unsigned long lastAlertsUpdate  = 0;
-//unsigned long lastAuroraUpdate = 0;
 int auroraValue = 0;
 bool auroraValid = false;
 
@@ -232,7 +218,7 @@ void setup() {
   pinMode(BTN_BRIGHTNESS, INPUT_PULLUP);
   ledcSetup(BACKLIGHT_CHANNEL, BACKLIGHT_FREQ, BACKLIGHT_RES);
   ledcAttachPin(BACKLIGHT_PIN, BACKLIGHT_CHANNEL);
-  ledcWrite(BACKLIGHT_CHANNEL, 20);  // Start at low brightness
+  ledcWrite(BACKLIGHT_CHANNEL, 60);  // Start at MED brightness
 
   connectWiFi();
   fetchWeather();
@@ -290,12 +276,27 @@ if (timeinfo.tm_hour == 14 && timeinfo.tm_min == 12) { //  this test was for 14:
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Enter deep sleep
 struct tm timeinfo;
+
 if (getLocalTime(&timeinfo)) {
-if (timeinfo.tm_hour >= 23) {    //   Begin deep sleeps at 23:00hrs wakes up when timer expires
-  Serial.println("Entering Deep Sleep...");
-  esp_sleep_enable_timer_wakeup((uint64_t)8 * 60 * 60 * 1000000); // 8 hours - wakes up after timer ends.  
-  //Timer is not accurate when in deep sleep. It may wake up a several minutes early/late.
-  esp_deep_sleep_start();
+  // Aurora scheduled fetch at :12 every hour
+  if (timeinfo.tm_min == 12) {
+    if (lastAuroraFetchHour != timeinfo.tm_hour ||
+        lastAuroraFetchMinute != timeinfo.tm_min) {
+      Serial.printf("Scheduled Aurora Fetch at %02d:%02d\n",
+                    timeinfo.tm_hour,
+                    timeinfo.tm_min);
+      getAuroraData();
+      lastAuroraFetchHour = timeinfo.tm_hour;
+      lastAuroraFetchMinute = timeinfo.tm_min;
+    }
+  }
+  // Deep sleep
+  if (timeinfo.tm_hour >= 23) {
+    Serial.println("Entering Deep Sleep...");
+    esp_sleep_enable_timer_wakeup(
+      (uint64_t)8 * 60 * 60 * 1000000
+    );
+    esp_deep_sleep_start();
   }
 }
 
@@ -305,25 +306,6 @@ if (alertActive != lastAlertState) {
   tft.fillScreen(TFT_BLACK);
   lastAlertState = alertActive;
 }
-
-  // Weather update
-  //if (now - lastWeatherUpdate > WEATHER_INTERVAL) {
-    //fetchWeather();
-    //tft.fillScreen(TFT_BLACK);
-    //lastWeatherUpdate = now;
-  //}
-
-  // Alerts update
-  //if (now - lastAlertsUpdate > ALERTS_INTERVAL) {
-    //fetchAlerts();
-    //lastAlertsUpdate = now;
-  //}
-
-  //if (millis() - lastAuroraUpdate >= AURORA_INTERVAL) {
-  //lastAuroraUpdate = millis();
-  //getAuroraData();
-//}
-
  // Page switching
   if (now - pageTimer > PAGE_DURATION) {
     pageTimer = now;
@@ -349,9 +331,10 @@ if (alertActive != lastAlertState) {
         currentPage = AQHI_PAGE;
         break;
 
-      case AQHI_PAGE:
-        currentPage = AURORA_PAGE;
-        break;
+     case AQHI_PAGE:
+  currentPage = AURORA_PAGE;
+  lastDisplayedAuroraValue = -1;
+  break;
 
       case AURORA_PAGE:
         currentPage = ALERT_PAGE;
@@ -391,22 +374,21 @@ if (alertActive != lastAlertState) {
   }
   else if (currentPage == AURORA_PAGE) {
   drawAuroraPage();
-}
+  }
 else if (currentPage == ALERT_PAGE) {
   drawAlertPage();
-}
+  }
   else {
     drawClockPage();
     //Serial.printf("drawclockpage");
     drawAlertIndicator();
-}
+  }
  // if (currentPage != CLOCK_PAGE) {
  // drawAlertIndicator();
 //}
  ///////////////////////////////////////////////////////////
 
   delay(50); // light yield
-
   //Brightness button
   static bool lastBtn = HIGH;
   bool btn = digitalRead(BTN_BRIGHTNESS);
@@ -423,6 +405,7 @@ else if (currentPage == ALERT_PAGE) {
   drawAlertIndicator();
   lastBtn = btn;
 }
+
 void checkScheduledFetches() {
   time_t now = time(nullptr);
   struct tm *timeinfo = localtime(&now);
@@ -436,10 +419,11 @@ void checkScheduledFetches() {
     lastWeatherFetchMinute = minute;
   }
   // WEATHER SCHEDULE
-  // :02, :05, :07, :10, then every 10 minutes
-  if (minute == 2 ||
-      minute == 5 ||
-      minute == 7 ||
+  // :02, :04, :06, :08, :10, then every 10 minutes
+  if (minute ==  2 ||
+      minute ==  4 ||
+      minute ==  6 ||
+      minute ==  8 ||
       minute == 10 ||
       minute == 20 ||
       minute == 30 ||
@@ -453,20 +437,10 @@ void checkScheduledFetches() {
   }
   // AURORA
   // Startup fetch
-  if (!auroraStartupFetchDone) {
-    Serial.println("Startup Aurora fetch...");
-    getAuroraData();
-    auroraStartupFetchDone = true;
-    lastAuroraFetchMinute = minute;
-  }
-  // AURORA SCHEDULE
-  // :12 every hour // Aurora Watch website updates hourly at :11 min past the hour (made it :12 for delay.)
-  if (minute == 12) {
-    if (lastAuroraFetchMinute != minute) {
-      Serial.println("Scheduled Aurora Fetch at :12");
-      getAuroraData();
-      lastAuroraFetchMinute = minute;
-    }
+if (!auroraStartupFetchDone) {
+  Serial.println("Startup Aurora fetch...");
+  getAuroraData();
+  auroraStartupFetchDone = true;
   }
 }
 
@@ -544,19 +518,23 @@ void fetchWeather() {
       ccDewpoint = extractLabeledValue(summary, "Dewpoint:");
       ccWindChill = extractLabeledValue(summary, "Wind Chill:");
       ccWind = extractLabeledValue(summary, "Wind:");
+         ccWind.trim();
+          if (ccWind.indexOf("calm") >= 0) {
+              ccWind.replace(" km/h", "");
+          }
       ccGust = extractLabeledValue(summary, "Gust:");
       ccAQHI = extractLabeledValue(summary, "Air Quality Health Index:");
-      ccAQHI.trim();
-      if (ccAQHI == "10+") {
-        aqhiValue = 11;   // represent 10+ internally as 11
-      }
-      else if (ccAQHI.length() == 0 ||
-               ccAQHI.equalsIgnoreCase("n/a")) {
-        aqhiValue = -1;   // unavailable
-      }
-      else {
-        aqhiValue = ccAQHI.toInt();
-      }
+          ccAQHI.trim();
+          if (ccAQHI == "10+") {
+            aqhiValue = 11;   // represent 10+ internally as 11
+          }
+          else if (ccAQHI.length() == 0 ||
+                  ccAQHI.equalsIgnoreCase("n/a")) {
+            aqhiValue = -1;   // unavailable
+          }
+          else {
+            aqhiValue = ccAQHI.toInt();
+          }
       ccHumidex = extractLabeledValue(
         summary, "Humidex:");
       Serial.println("Parsed Current Conditions:");
@@ -630,226 +608,7 @@ void fetchWeather() {
   Serial.printf("alertActive: %d\n", alertActive);
   Serial.println("==============================");
 }
-/*
-// ===== Fetch and Parse Weather =====
-void fetchWeather() {
-  HTTPClient http;
-  http.begin(WEATHER_RSS_URL);
 
-  int code = http.GET();
-  Serial.printf("Weather RSS HTTP code: %d\n", code);
-
-  if (code == 200) {
-    String xml = http.getString();
-    fetchForecast24h(xml);
-
-
-    // Find correct <entry> with current conditions
-    int pos = 0;
-    while (true) {
-      int start = xml.indexOf("<entry>", pos);
-      if (start == -1) break;
-      int end   = xml.indexOf("</entry>", start);
-      if (end == -1) break;
-
-      String entry = xml.substring(start, end);
-
-      // Category for current conditions
-      String entryTitle = extractXmlValue(entry, "title");
-
-        // Select the "Current Conditions" entry
-        if (!entryTitle.startsWith("Current Conditions")) {
-          pos = end + 8;
-          continue;
-        }
-      // Extract updated timestamp
-      ccUpdated = extractXmlValue(entry, "updated");
-      // Extract summary CDATA
-      String summary = extractXmlValue(entry, "summary");
-      
-      summary.replace("<![CDATA[", "");
-      summary.replace("]]>", "");
-      summary.replace("<br/>", "\n");
-      summary.replace("<br />", "\n");
-      summary.replace("<b>", "");
-      summary.replace("</b>", "");
-      summary.replace("&deg;C", ""); // add C 
-      summary.trim();
-
-      // Parse labeled values
-      ccObservedAt = formatObservedTime(
-                 extractLabeledValue(summary, "Observed at:")
-               );
-
-      //ccObservedAt  = extractLabeledValue(summary, "Observed at:");
-      ccCondition   = extractLabeledValue(summary, "Condition:");
-      ccTemperature = extractLabeledValue(summary, "Temperature:");
-        ccPressure = extractLabeledValue(summary, "Pressure / Tendency:");
-        ccPressure.trim();
-            if (ccPressure.isEmpty()) {
-              ccPressure = extractLabeledValue(summary, "Pressure:");
-              ccPressure.trim();
-      }
-      ccVisibility  = extractLabeledValue(summary, "Visibility:");
-      ccHumidity    = extractLabeledValue(summary, "Humidity:");
-      ccDewpoint    = extractLabeledValue(summary, "Dewpoint:");
-      ccWindChill   = extractLabeledValue(summary, "Wind Chill:");
-      ccWind        = extractLabeledValue(summary, "Wind:");
-      ccGust        = extractLabeledValue(summary, "Gust:");
-      ccAQHI        = extractLabeledValue(summary, "Air Quality Health Index:");
-      ccAQHI.trim();
-      if (ccAQHI == "10+") {
-          aqhiValue = 11;          // represent 10+ internally as 11
-            }
-      else if (ccAQHI.length() == 0 || ccAQHI.equalsIgnoreCase("n/a")) {
-        aqhiValue = -1;          // unavailable
-          }
-        else {
-      aqhiValue = ccAQHI.toInt();
-          }
-      ccHumidex     = extractLabeledValue(summary, "Humidex:");
-
-      break;
-    }
-
-    Serial.println("Parsed Weather:");
-    Serial.println(ccObservedAt);
-    Serial.println(ccCondition);
-    Serial.println(ccTemperature);
-    Serial.println(ccHumidity);
-    Serial.println(ccAQHI);
-    Serial.println(ccHumidex);
-    Serial.print("AQHI = '");
-    Serial.print(ccAQHI);
-    Serial.println("'");
-  }
-
-  http.end();
-}
-void fetchForecast24h(const String &xml) {
-
-  fc6hrTitle = "";
-  fc6hrSummary = "";
-  fc12hrTitle = "";
-  fc12hrSummary = "";
-
-  int pos = 0;
-  int found = 0;
-
-  while (true) {
-    int start = xml.indexOf("<entry>", pos);
-    if (start == -1) break;
-
-    int end = xml.indexOf("</entry>", start);
-    if (end == -1) break;
-
-    String entry = xml.substring(start, end);
-    pos = end + 8;
-
-    // Only forecast entries
-    if (entry.indexOf("Weather Forecasts") == -1) continue;
-
-    String title   = extractXmlValue(entry, "title");
-    String summary = extractXmlValue(entry, "summary");
-
-    // Clean HTML / CDATA
-    summary.replace("<![CDATA[", "");
-    summary.replace("]]>", "");
-    summary.replace("<br/>", "\n");
-    summary.replace("<br />", "\n");
-    summary.replace("<b>", "");
-    summary.replace("</b>", "");
-    summary.trim();
-
-    if (found == 0) {
-      fc6hrTitle = title;
-      fc6hrSummary = summary;
-    } else if (found == 1) {
-      fc12hrTitle = title;
-      fc12hrSummary = summary;
-      break;  // we only need 24h
-    }
-
-    found++;
-  }
-}
-
-// ===== Fetch and Parse Alerts =====
-void fetchAlerts() {
-  HTTPClient http;
-  http.begin(ALERTS_RSS_URL);
-  int code = http.GET();
-  Serial.printf("Alerts RSS HTTP code: %d\n", code);
-
-  if (code == 200) {
-    String xml = http.getString();
-    // Parse first alert entry
-    int pos = 0;
-
-    Serial.printf("alertTitle: '%s'\n", alertTitle.c_str());
-    Serial.printf("alertActive: %d\n", alertActive);
-
-while (true) {
-
-  int start = xml.indexOf("<entry>", pos);
-  if (start == -1) break;
-
-  int end = xml.indexOf("</entry>", start);
-  if (end == -1) break;
-
-  String entry = xml.substring(start, end);
-
-  pos = end + 8;
-
-  // Ignore weather conditions and forecasts
-  if (entry.indexOf("Warnings and Watches") == -1) {
-  pos = end + 8;
-    continue;
-  }
-  
-  String title = extractXmlValue(entry, "title");
-  //String impact = extractXmlValue(entry, "impact");
-  //String confidence = extractXmlValue(entry, "confidence");
-  alertImpact = extractXmlValue(entry, "impact");
-  alertConfidence = extractXmlValue(entry, "confidence");
-
-  //title.replace("City of ", "");
-  //title.replace("city of ", "");
-  //title.trim();
-
-  //String summaryHtml = extractXmlValue(entry, "summary");
-
-  //summaryHtml.replace("<![CDATA[", "");
-  //summaryHtml.replace("]]>", "");
-  //summaryHtml.replace("<br/>", "\n");
-  //summaryHtml.replace("<br />", "\n");
-  //summaryHtml.replace("<b>", "");
-  //summaryHtml.replace("</b>", "");
-  //summaryHtml.trim();
-
-  alertTitle = title;
-  //alertSummary = summaryHtml;
-  String t = alertTitle;
-  t.toLowerCase();
-  alertActive =
-    (t.indexOf("no alerts") == -1) &&
-    (t.indexOf("orange") >= 0 ||
-     t.indexOf("yellow") >= 0 ||
-     t.indexOf("red") >= 0 ||
-     t.indexOf("special") >= 0 ||
-     t.indexOf("air quality") >= 0);
-
-  break;
-}
-    Serial.printf("Alert title: '%s'\n", alertTitle.c_str());
-    Serial.printf("alertActive=%d alertJustAppeared=%d\n",alertActive, alertJustAppeared);
-    Serial.println("Parsed Alert:");
-    Serial.println(alertTitle);
-    //Serial.println(alertSummary);
-  }
-  http.end();
-}
-*/
 void getAuroraData() {
   Serial.println("Fetching Aurora Data...");
   if (WiFi.status() != WL_CONNECTED) {
@@ -1414,6 +1173,8 @@ tft.drawCentreString(aqhiText, 192, 16, 1); // aqhiText, 190, 12, 1 //  186,12,1
 }
 
 void drawAuroraPage() {
+  Serial.printf("DRAW AURORA PAGE: value=%d valid=%d\n",
+              auroraValue, auroraValid);
   tft.setTextSize(2);
   tft.setCursor(0, 0);
   tft.setTextColor(TFT_WHITE);
@@ -1437,6 +1198,7 @@ void drawAuroraPage() {
 
   tft.setTextColor(textColor, TFT_BLACK);
   tft.setTextSize(4);
+  Serial.printf("ABOUT TO DISPLAY AURORA: %d%%\n", auroraValue);
   tft.printf("   %d%%", auroraValue);
   // Draw bar
   drawAuroraBar(auroraValue);
